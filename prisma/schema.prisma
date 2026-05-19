@@ -1,0 +1,387 @@
+// =============================================================
+//  Prisma Schema — Marketplace Gastronómico
+//  Auth: Auth0 (Google + email)
+//  Base de datos: PostgreSQL (Supabase)
+// =============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================
+//  ENUMS
+// =============================================================
+
+enum Role {
+  CONSUMER
+  RESTAURANT_OWNER
+  DELIVERY
+  ADMIN
+}
+
+enum OrderType {
+  DELIVERY
+  RESERVATION
+}
+
+enum OrderStatus {
+  PENDING       // Creado, esperando pago
+  CONFIRMED     // Pago recibido, confirmado por restaurante
+  PREPARING     // En cocina
+  READY         // Listo para recoger / entregar
+  ON_THE_WAY    // Repartidor en camino (solo delivery)
+  DELIVERED     // Entregado / cliente en local
+  CANCELLED     // Cancelado
+}
+
+enum ProductType {
+  DISH
+  DRINK
+  COMBO
+}
+
+enum RestaurantStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CULQI_CARD
+  YAPE
+  CASH_ON_DELIVERY
+}
+
+enum DriverStatus {
+  OFFLINE
+  AVAILABLE
+  ON_DELIVERY
+  SUSPENDED
+}
+
+enum VehicleType {
+  BICYCLE
+  MOTORCYCLE
+  CAR
+  ON_FOOT
+}
+
+// =============================================================
+//  USER
+//  El registro y login lo maneja Auth0.
+//  auth0Id es el "sub" que devuelve Auth0 en el JWT.
+//  Al primer login se crea automáticamente el User en BD.
+// =============================================================
+
+model User {
+  id       String @id @default(uuid())
+  auth0Id  String @unique  // "auth0|xxx" | "google-oauth2|xxx"
+  email    String @unique
+  name     String
+  phone    String?
+  avatarUrl String?
+  role     Role    @default(CONSUMER)
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relaciones
+  restaurant      Restaurant?
+  orders          Order[]
+  driverProfile   DeliveryDriver?
+  consumerProfile ConsumerProfile?
+
+  @@map("users")
+}
+
+// =============================================================
+//  RESTAURANT
+// =============================================================
+
+model Restaurant {
+  id                   String           @id @default(uuid())
+  name                 String
+  ruc                  String           @unique
+  description          String?          @db.Text
+  category             String
+  logoUrl              String?
+  bannerUrl            String?
+  address              String
+  district             String
+  latitude             Float?
+  longitude            Float?
+  phone                String?
+  openingHours         Json?
+  status               RestaurantStatus @default(PENDING_VERIFICATION)
+  isDeliveryEnabled    Boolean          @default(true)
+  isReservationEnabled Boolean          @default(true)
+  deliveryFee          Float            @default(0)
+  minOrderAmount       Float?
+  estimatedTime        Int?
+  commissionRate       Float            @default(0.08)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ownerId String     @unique
+  owner   User       @relation(fields: [ownerId], references: [id])
+
+  products   Product[]
+  categories ProductCategory[]
+  orders     Order[]
+
+  @@map("restaurants")
+}
+
+// =============================================================
+//  PRODUCT CATEGORY
+// =============================================================
+
+model ProductCategory {
+  id    String @id @default(uuid())
+  name  String
+  order Int    @default(0)
+
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  products Product[]
+
+  @@map("product_categories")
+}
+
+// =============================================================
+//  PRODUCT
+// =============================================================
+
+model Product {
+  id          String      @id @default(uuid())
+  name        String
+  description String?
+  type        ProductType @default(DISH)
+  price       Float
+  discountPct Int         @default(0)
+  imageUrl    String?
+  isAvailable Boolean     @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurantId String
+  restaurant   Restaurant      @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  categoryId String?
+  category   ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  orderItems OrderItem[]
+
+  @@map("products")
+}
+
+// =============================================================
+//  ORDER
+// =============================================================
+
+model Order {
+  id             String      @id @default(uuid())
+  orderNumber    String      @unique @default(cuid())
+  type           OrderType
+  status         OrderStatus @default(PENDING)
+  subtotal       Float
+  discountAmount Float       @default(0)
+  deliveryFee    Float       @default(0)
+  total          Float
+  notes          String?     @db.Text
+
+  // Campos de RESERVATION
+  reservationDate DateTime?
+  reservationTime String?
+  partySize       Int?
+
+  // Campos de DELIVERY
+  deliveryAddress   String?
+  deliveryDistrict  String?
+  deliveryPhone     String?
+  deliveryNotes     String?   @db.Text
+  estimatedDelivery DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+
+  items   OrderItem[]
+  payment Payment?
+
+  driverId String?
+  driver   DeliveryDriver? @relation(fields: [driverId], references: [id], onDelete: SetNull)
+
+  consumerProfileId String?
+  consumerProfile   ConsumerProfile? @relation(fields: [consumerProfileId], references: [id], onDelete: SetNull)
+
+  // Dirección de entrega seleccionada (solo DELIVERY)
+  savedAddressId String?
+  savedAddress   SavedAddress? @relation(fields: [savedAddressId], references: [id], onDelete: SetNull)
+
+  @@map("orders")
+}
+
+// =============================================================
+//  ORDER ITEM
+// =============================================================
+
+model OrderItem {
+  id        String @id @default(uuid())
+  quantity  Int
+  unitPrice Float
+  discount  Int    @default(0)
+  subtotal  Float
+
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  @@map("order_items")
+}
+
+// =============================================================
+//  PAYMENT
+// =============================================================
+
+model Payment {
+  id            String        @id @default(uuid())
+  method        PaymentMethod
+  status        PaymentStatus @default(PENDING)
+  amount        Float
+  currency      String        @default("PEN")
+  transactionId String?
+  metadata      Json?
+  paidAt        DateTime?
+  createdAt     DateTime      @default(now())
+
+  orderId String  @unique
+  order   Order   @relation(fields: [orderId], references: [id])
+
+  @@map("payments")
+}
+
+// =============================================================
+//  DELIVERY DRIVER
+// =============================================================
+
+model DeliveryDriver {
+  id           String       @id @default(uuid())
+  status       DriverStatus @default(OFFLINE)
+  vehicleType  VehicleType  @default(MOTORCYCLE)
+  licensePlate String?
+  dni          String?      @unique
+
+  dniPhotoUrl     String?
+  vehiclePhotoUrl String?
+  isVerified      Boolean @default(false)
+
+  currentLatitude  Float?
+  currentLongitude Float?
+  lastLocationAt   DateTime?
+
+  totalDeliveries Int   @default(0)
+  totalEarnings   Float @default(0)
+  rating          Float @default(0)
+  ratingCount     Int   @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  orders   Order[]
+  earnings DriverEarning[]
+
+  @@map("delivery_drivers")
+}
+
+// =============================================================
+//  DRIVER EARNING
+// =============================================================
+
+model DriverEarning {
+  id       String  @id @default(uuid())
+  amount   Float
+  isPaid   Boolean  @default(false)
+  paidAt   DateTime?
+  orderId  String   @unique
+
+  driverId String
+  driver   DeliveryDriver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@map("driver_earnings")
+}
+
+// =============================================================
+//  CONSUMER PROFILE
+// =============================================================
+
+model ConsumerProfile {
+  id               String   @id @default(uuid())
+  favoriteCuisines String[]
+  dietaryNotes     String?
+  totalOrders      Int      @default(0)
+  totalSpent       Float    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  addresses SavedAddress[]
+  orders    Order[]
+
+  @@map("consumer_profiles")
+}
+
+// =============================================================
+//  SAVED ADDRESS
+// =============================================================
+
+model SavedAddress {
+  id        String  @id @default(uuid())
+  label     String
+  address   String
+  district  String
+  reference String?
+  latitude  Float?
+  longitude Float?
+  isDefault Boolean @default(false)
+
+  profileId String
+  profile   ConsumerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  orders    Order[]   // pedidos que usaron esta dirección
+
+  createdAt DateTime @default(now())
+
+  @@map("saved_addresses")
+}
