@@ -7,9 +7,10 @@ import 'express-async-errors'
 import authRouter from './modules/auth/auth.routes.js'
 import restaurantsRouter from './modules/restaurants/restaurants.routes.js'
 import productsRouter from './modules/products/products.routes.js'
-// import ordersRouter from './modules/orders/orders.routes.js'
+import ordersRouter from './modules/orders/orders.routes.js'
 import paymentsRouter from './modules/payments/payments.routes.js'
 import adminRouter from './modules/admin/admin.routes.js'
+import driversRouter from './modules/drivers/drivers.routes.js'
 
 const app = express()
 
@@ -32,9 +33,10 @@ app.get('/health', (req, res) => {
 app.use('/api/v1/auth', authRouter)
 app.use('/api/v1/restaurants', restaurantsRouter)
 app.use('/api/v1/products',    productsRouter)
-// app.use('/api/v1/orders',      ordersRouter)
+app.use('/api/v1/orders',      ordersRouter)
 app.use('/api/v1/payments',    paymentsRouter)
 app.use('/api/v1/admin',       adminRouter)
+app.use('/api/v1/drivers', driversRouter)
 
 // ── 404 ───────────────────────────────────────────────────────
 app.use((req, res) => {

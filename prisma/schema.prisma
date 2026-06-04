@@ -1,9 +1,3 @@
-// =============================================================
-//  Prisma Schema — Marketplace Gastronómico
-//  Auth: Auth0 (Google + email)
-//  Base de datos: PostgreSQL (Supabase)
-// =============================================================
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -12,10 +6,6 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
-
-// =============================================================
-//  ENUMS
-// =============================================================
 
 enum Role {
   CONSUMER
@@ -30,13 +20,13 @@ enum OrderType {
 }
 
 enum OrderStatus {
-  PENDING       // Creado, esperando pago
-  CONFIRMED     // Pago recibido, confirmado por restaurante
-  PREPARING     // En cocina
-  READY         // Listo para recoger / entregar
-  ON_THE_WAY    // Repartidor en camino (solo delivery)
-  DELIVERED     // Entregado / cliente en local
-  CANCELLED     // Cancelado
+  PENDING
+  CONFIRMED
+  PREPARING
+  READY
+  ON_THE_WAY
+  DELIVERED
+  CANCELLED
 }
 
 enum ProductType {
@@ -78,27 +68,18 @@ enum VehicleType {
   ON_FOOT
 }
 
-// =============================================================
-//  USER
-//  El registro y login lo maneja Auth0.
-//  auth0Id es el "sub" que devuelve Auth0 en el JWT.
-//  Al primer login se crea automáticamente el User en BD.
-// =============================================================
-
 model User {
-  id       String @id @default(uuid())
-  auth0Id  String @unique  // "auth0|xxx" | "google-oauth2|xxx"
-  email    String @unique
-  name     String
-  phone    String?
+  id        String  @id @default(uuid())
+  auth0Id   String  @unique
+  email     String  @unique
+  name      String
+  phone     String?
   avatarUrl String?
-  role     Role    @default(CONSUMER)
-  isActive Boolean @default(true)
-
+  role      Role    @default(CONSUMER)
+  isActive  Boolean @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Relaciones
   restaurant      Restaurant?
   orders          Order[]
   driverProfile   DeliveryDriver?
@@ -106,10 +87,6 @@ model User {
 
   @@map("users")
 }
-
-// =============================================================
-//  RESTAURANT
-// =============================================================
 
 model Restaurant {
   id                   String           @id @default(uuid())
@@ -132,9 +109,8 @@ model Restaurant {
   minOrderAmount       Float?
   estimatedTime        Int?
   commissionRate       Float            @default(0.08)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
 
   ownerId String     @unique
   owner   User       @relation(fields: [ownerId], references: [id])
@@ -145,10 +121,6 @@ model Restaurant {
 
   @@map("restaurants")
 }
-
-// =============================================================
-//  PRODUCT CATEGORY
-// =============================================================
 
 model ProductCategory {
   id    String @id @default(uuid())
@@ -163,10 +135,6 @@ model ProductCategory {
   @@map("product_categories")
 }
 
-// =============================================================
-//  PRODUCT
-// =============================================================
-
 model Product {
   id          String      @id @default(uuid())
   name        String
@@ -176,9 +144,8 @@ model Product {
   discountPct Int         @default(0)
   imageUrl    String?
   isAvailable Boolean     @default(true)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
   restaurantId String
   restaurant   Restaurant      @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
@@ -191,10 +158,6 @@ model Product {
   @@map("products")
 }
 
-// =============================================================
-//  ORDER
-// =============================================================
-
 model Order {
   id             String      @id @default(uuid())
   orderNumber    String      @unique @default(cuid())
@@ -206,16 +169,14 @@ model Order {
   total          Float
   notes          String?     @db.Text
 
-  // Campos de RESERVATION
   reservationDate DateTime?
   reservationTime String?
   partySize       Int?
 
-  // Campos de DELIVERY
   deliveryAddress   String?
   deliveryDistrict  String?
   deliveryPhone     String?
-  deliveryNotes     String?   @db.Text
+  deliveryNotes     String?  @db.Text
   estimatedDelivery DateTime?
 
   createdAt DateTime @default(now())
@@ -236,16 +197,11 @@ model Order {
   consumerProfileId String?
   consumerProfile   ConsumerProfile? @relation(fields: [consumerProfileId], references: [id], onDelete: SetNull)
 
-  // Dirección de entrega seleccionada (solo DELIVERY)
   savedAddressId String?
   savedAddress   SavedAddress? @relation(fields: [savedAddressId], references: [id], onDelete: SetNull)
 
   @@map("orders")
 }
-
-// =============================================================
-//  ORDER ITEM
-// =============================================================
 
 model OrderItem {
   id        String @id @default(uuid())
@@ -263,10 +219,6 @@ model OrderItem {
   @@map("order_items")
 }
 
-// =============================================================
-//  PAYMENT
-// =============================================================
-
 model Payment {
   id            String        @id @default(uuid())
   method        PaymentMethod
@@ -278,24 +230,24 @@ model Payment {
   paidAt        DateTime?
   createdAt     DateTime      @default(now())
 
-  orderId String  @unique
-  order   Order   @relation(fields: [orderId], references: [id])
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id])
 
   @@map("payments")
 }
-
-// =============================================================
-//  DELIVERY DRIVER
-// =============================================================
 
 model DeliveryDriver {
   id           String       @id @default(uuid())
   status       DriverStatus @default(OFFLINE)
   vehicleType  VehicleType  @default(MOTORCYCLE)
   licensePlate String?
-  dni          String?      @unique
 
+  dni             String?  @unique
   dniPhotoUrl     String?
+
+  licenseNumber   String?
+  licensePhotoUrl String?
+
   vehiclePhotoUrl String?
   isVerified      Boolean @default(false)
 
@@ -320,16 +272,12 @@ model DeliveryDriver {
   @@map("delivery_drivers")
 }
 
-// =============================================================
-//  DRIVER EARNING
-// =============================================================
-
 model DriverEarning {
-  id       String  @id @default(uuid())
-  amount   Float
-  isPaid   Boolean  @default(false)
-  paidAt   DateTime?
-  orderId  String   @unique
+  id      String    @id @default(uuid())
+  amount  Float
+  isPaid  Boolean   @default(false)
+  paidAt  DateTime?
+  orderId String    @unique
 
   driverId String
   driver   DeliveryDriver @relation(fields: [driverId], references: [id], onDelete: Cascade)
@@ -338,10 +286,6 @@ model DriverEarning {
 
   @@map("driver_earnings")
 }
-
-// =============================================================
-//  CONSUMER PROFILE
-// =============================================================
 
 model ConsumerProfile {
   id               String   @id @default(uuid())
@@ -362,10 +306,6 @@ model ConsumerProfile {
   @@map("consumer_profiles")
 }
 
-// =============================================================
-//  SAVED ADDRESS
-// =============================================================
-
 model SavedAddress {
   id        String  @id @default(uuid())
   label     String
@@ -379,7 +319,7 @@ model SavedAddress {
   profileId String
   profile   ConsumerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
-  orders    Order[]   // pedidos que usaron esta dirección
+  orders Order[]
 
   createdAt DateTime @default(now())
 
