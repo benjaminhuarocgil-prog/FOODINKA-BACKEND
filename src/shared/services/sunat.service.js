@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { AppError } from '../utils/AppError.js'
+import { AppError } from '../utils/appError.js'
 
 export function validateRucFormat(ruc) {
   if (!/^\d{11}$/.test(ruc)) return false
