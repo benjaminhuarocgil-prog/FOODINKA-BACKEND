@@ -1,5 +1,5 @@
 import { prisma } from '../../config/database.js'
-import { AppError } from '../../shared/utils/AppError.js'
+import { AppError } from '../../shared/utils/appError.js'
 
 // ── Registrarse como repartidor ───────────────────────────────
 export async function register(userId, body) {
