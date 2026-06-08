@@ -1,4 +1,6 @@
 import * as authService from './auth.service.js'
+import { prisma } from '../../config/database.js'
+import { AppError } from '../../shared/utils/appError.js'
 
 // POST /api/v1/auth/sync
 export async function sync(req, res) {
@@ -39,4 +41,70 @@ export async function changeRole(req, res) {
   }
   const user = await authService.changeRole(req.params.id, role)
   res.json({ success: true, message: `Rol actualizado a ${role}`, data: user })
+}
+
+// POST /api/v1/auth/register-restaurant
+export async function registerRestaurant(req, res) {
+  const userId = req.user.id
+  const {
+    name, ruc, category, description,
+    address, district, phone,
+  } = req.body
+ 
+  // Validaciones
+  if (!name || !ruc || !category || !address || !district) {
+    return res.status(400).json({
+      success: false,
+      message: 'Los campos name, ruc, category, address y district son requeridos',
+    })
+  }
+  if (!/^\d{11}$/.test(ruc)) {
+    return res.status(400).json({
+      success: false,
+      message: 'El RUC debe tener exactamente 11 dígitos',
+    })
+  }
+ 
+  // Verificar que el usuario no tenga ya un restaurante
+  const existing = await prisma.restaurant.findUnique({ where: { ownerId: userId } })
+  if (existing) {
+    return res.status(409).json({
+      success: false,
+      message: 'Ya tienes un restaurante registrado',
+    })
+  }
+ 
+  // Verificar que el RUC no esté en uso
+  const rucInUse = await prisma.restaurant.findUnique({ where: { ruc } })
+  if (rucInUse) {
+    return res.status(409).json({
+      success: false,
+      message: 'Este RUC ya está registrado en la plataforma',
+    })
+  }
+ 
+  // Crear restaurante y actualizar rol en una sola transacción
+  const [restaurant] = await prisma.$transaction([
+    prisma.restaurant.create({
+      data: {
+        ownerId: userId,
+        name, ruc, category, description,
+        address, district, phone,
+        status: 'PENDING',
+        isDeliveryEnabled:    true,
+        isReservationEnabled: true,
+        deliveryFee:          0,
+      },
+    }),
+    prisma.user.update({
+      where: { id: userId },
+      data:  { role: 'RESTAURANT_OWNER' },
+    }),
+  ])
+ 
+  res.status(201).json({
+    success: true,
+    message: 'Restaurante registrado. Pendiente de verificación por el administrador.',
+    data: restaurant,
+  })
 }

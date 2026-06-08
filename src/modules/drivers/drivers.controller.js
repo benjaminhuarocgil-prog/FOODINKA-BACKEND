@@ -27,3 +27,8 @@ export async function updateStatus(req, res) {
   const data = await svc.updateStatus(req.user.id, status)
   res.json({ success: true, message: `Estado actualizado a ${status}`, data })
 }
+
+export async function updateVehicle(req, res) {
+  const data = await svc.updateVehicle(req.user.id, req.body)
+  res.json({ success: true, message: 'Vehículo actualizado', data })
+}

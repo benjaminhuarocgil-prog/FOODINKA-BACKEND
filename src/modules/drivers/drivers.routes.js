@@ -12,5 +12,6 @@ router.post('/register',           ctrl.register)
 router.get('/orders/available',    authorize('DELIVERY'), ctrl.availableOrders)
 router.patch('/location',          authorize('DELIVERY'), ctrl.updateLocation)
 router.patch('/status',            authorize('DELIVERY'), ctrl.updateStatus)
+router.patch('/vehicle',           authorize('DELIVERY'), ctrl.updateVehicle)
 
 export default router

@@ -80,3 +80,22 @@ export async function updateStatus(userId, status) {
 
   return prisma.deliveryDriver.update({ where: { userId }, data: { status } })
 }
+
+// ── Actualizar vehículo ──────────────────────────────────────
+export async function updateVehicle(userId, { vehicleType, licensePlate }) {
+  const driver = await prisma.deliveryDriver.findUnique({ where: { userId } })
+  if (!driver) throw new AppError('Perfil de repartidor no encontrado', 404)
+ 
+  const valid = ['MOTORCYCLE', 'BICYCLE', 'CAR', 'WALKING']
+  if (vehicleType && !valid.includes(vehicleType)) {
+    throw new AppError('Tipo de vehículo inválido', 400)
+  }
+ 
+  return prisma.deliveryDriver.update({
+    where: { userId },
+    data: {
+      ...(vehicleType  !== undefined && { vehicleType }),
+      ...(licensePlate !== undefined && { licensePlate: licensePlate || null }),
+    },
+  })
+}

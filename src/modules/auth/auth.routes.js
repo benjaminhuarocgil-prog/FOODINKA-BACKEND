@@ -18,4 +18,7 @@ router.patch('/me', authenticate, ctrl.updateMe)
 // ── Cambiar rol (solo admin) ─────────────────────────────────
 router.patch('/users/:id/role', authenticate, authorize('ADMIN'), ctrl.changeRole)
 
+// ── Registrar restaurante (solo usuarios sin restaurante) ────
+router.post('/register-restaurant', authenticate, ctrl.registerRestaurant)
+
 export default router

@@ -71,7 +71,11 @@ export async function getProfile(userId) {
         select: { id: true, name: true, status: true, category: true, logoUrl: true },
       },
       driverProfile: {
-        select: { id: true, status: true, isVerified: true, vehicleType: true, rating: true },
+        select: {
+          id: true, status: true, isVerified: true,
+          vehicleType: true, licensePlate: true,
+          dni: true, licenseNumber: true, rating: true,
+        },
       },
     },
   })
