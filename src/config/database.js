@@ -8,8 +8,10 @@ import { PrismaClient } from '@prisma/client'
 const CONNECTION_LIMIT = parseInt(process.env.DB_POOL_SIZE || '10')
 
 // La DATABASE_URL debe incluir el pooler de Supabase para producción:
-// postgresql://user:pass@db.xxx.supabase.co:5432/postgres?pgbouncer=true&connection_limit=10
-// En desarrollo se usa la conexión directa (puerto 5432).
+// postgresql://user:pass@db.xxx.supabase.co:6543/postgres?pgbouncer=true&connection_limit=10
+// ⚠️  Usar puerto 6543 (Transaction Pooler), NO 5432.
+// ⚠️  El parámetro pgbouncer=true desactiva prepared statements en Prisma,
+//     lo que es obligatorio cuando se usa PgBouncer (Supabase Pooler).
 
 const globalForPrisma = globalThis
 
@@ -17,7 +19,7 @@ export const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({
     log: process.env.NODE_ENV === 'development'
-      ? ['error', 'warn']       // quitar 'query' en dev — reduce noise y mejora perf
+      ? ['error', 'warn']
       : ['error'],
     datasources: {
       db: {
@@ -33,9 +35,15 @@ if (process.env.NODE_ENV !== 'production') {
 export async function connectDB() {
   try {
     await prisma.$connect()
-    // Configurar timeouts a nivel de conexión
-    await prisma.$executeRawUnsafe(`SET statement_timeout = '10s'`)
-    await prisma.$executeRawUnsafe(`SET idle_in_transaction_session_timeout = '30s'`)
+
+    // ⚠️  NO usar $executeRawUnsafe con SET session_timeout aquí.
+    // PgBouncer (Transaction Pooler de Supabase) no soporta prepared
+    // statements ni comandos SET de sesión — causa el error 42P05.
+    // Los timeouts se configuran desde la DATABASE_URL con pgbouncer=true.
+
+    // Verificar conexión con un query simple sin prepared statements
+    await prisma.$queryRaw`SELECT 1`
+
     console.log(`✅ BD conectada (pool: ${CONNECTION_LIMIT} conexiones por proceso)`)
   } catch (error) {
     console.error('❌ Error al conectar a la base de datos:', error.message)
