@@ -69,6 +69,20 @@ export async function createPreference({ paymentId, orderId, orderNumber, amount
 }
 
 /**
+ * Busca un pago en MP por external_reference (sin necesitar el id de MP).
+ * Útil para un botón de "Verificar pago" manual: cubre el caso en que el
+ * usuario nunca volvió por la back_url y el webhook tampoco llegó (típico
+ * en desarrollo local sin ngrok).
+ */
+export async function searchByExternalReference(externalReference) {
+  const client = new Payment(getClient())
+  const result = await client.search({
+    options: { external_reference: externalReference, sort: 'date_created', criteria: 'desc' },
+  })
+  return result.results?.[0] || null
+}
+
+/**
  * Obtiene el detalle real de un pago directamente desde los servidores de MP.
  * Nunca confiamos en el body del webhook por sí solo — siempre re-consultamos
  * con el id recibido, para evitar notificaciones falsificadas.

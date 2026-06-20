@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────────────
 import { prisma } from '../../config/database.js'
 import { AppError } from '../../shared/utils/appError.js'
-import { createPreference, getPayment as getMpPayment } from '../../shared/services/mercadopago.service.js'
+import { createPreference, getPayment as getMpPayment, searchByExternalReference } from '../../shared/services/mercadopago.service.js'
 
 // ── Simulador de pasarela de pago (Yape / Efectivo) ───────────
 // Retorna: { approved: true/false, transactionId, metadata }
@@ -215,12 +215,17 @@ export async function syncMercadoPago({ orderId, userId, mpPaymentId }) {
   if (order.userId !== userId) throw new AppError('Sin permisos', 403)
 
   const idToCheck = mpPaymentId || payment.transactionId
-  if (!idToCheck) {
-    // Todavía no tenemos ningún id de pago de MP que consultar.
-    return payment
+  if (idToCheck) {
+    return (await processMercadoPagoUpdate(idToCheck)) || payment
   }
 
-  return (await processMercadoPagoUpdate(idToCheck)) || payment
+  // Nunca volvimos por la back_url y el webhook tampoco llegó (típico en
+  // desarrollo local sin ngrok) — buscamos directamente en MP por
+  // external_reference, que es el id de nuestro propio registro Payment.
+  const found = await searchByExternalReference(payment.id)
+  if (!found) return payment
+
+  return (await processMercadoPagoUpdate(found.id)) || payment
 }
 
 // ── Ver pago de un pedido ─────────────────────────────────────

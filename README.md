@@ -20,6 +20,7 @@ API REST del marketplace gastronómico **Antojia**, construida con Node.js, Expr
 | Zod | 3.x | Validación de esquemas |
 | Winston | 3.x | Logging estructurado |
 | Nodemailer | 8.x | Envío de emails |
+| Mercado Pago SDK | 2.x | Pasarela de pagos (Checkout Pro) |
 
 ---
 
@@ -45,10 +46,13 @@ backend/
 │   │   ├── restaurants/     # CRUD restaurantes + categorías
 │   │   ├── products/        # CRUD productos del menú
 │   │   ├── orders/          # Pedidos delivery y reservas
-│   │   ├── payments/        # Procesamiento de pagos (Culqi / Yape)
+│   │   ├── payments/        # Procesamiento de pagos (Mercado Pago / Yape / Efectivo)
 │   │   ├── drivers/         # Repartidores y asignación
 │   │   └── admin/           # Panel administrativo
 │   └── shared/
+│       ├── services/
+│       │   ├── sunat.service.js        # Verificación de RUC (apiperu.dev)
+│       │   └── mercadopago.service.js  # Preferencias, búsqueda y consulta de pagos
 │       └── utils/           # AppError, helpers
 └── package.json
 ```
@@ -88,7 +92,18 @@ AUTH0_AUDIENCE=https://tu-api.com
 PORT=4000
 NODE_ENV=development
 FRONTEND_URL=http://localhost:5173
+BACKEND_URL=http://localhost:4000   # usado para el webhook de Mercado Pago
+
+# SUNAT — verificación de RUC (proveedor: apiperu.dev)
+SUNAT_API_URL=https://apiperu.dev/api/ruc
+SUNAT_API_TOKEN=tu_token_de_apiperu.dev
+
+# Mercado Pago — Checkout Pro
+# Credenciales de prueba: https://www.mercadopago.com.pe/developers/panel/app
+MERCADOPAGO_ACCESS_TOKEN=TEST-xxxxxxxxxxxxxxxx
 ```
+
+> 💡 Ver `.env.example` para la lista completa y comentada de todas las variables.
 
 ### 4. Inicializar la base de datos
 ```bash
@@ -163,7 +178,10 @@ Base URL: `http://localhost:4000/api/v1`
 ### 💳 Pagos — `/payments`
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
-| POST | `/charge` | ✅ | Procesar pago de un pedido |
+| POST | `/charge` | ✅ | Pagar con Yape o Efectivo al recibir |
+| POST | `/mercadopago/preference` | ✅ | Crear preferencia de Mercado Pago (Checkout Pro) — devuelve la URL de pago |
+| POST | `/mercadopago/sync` | ✅ | Sincronizar el estado real del pago al volver del checkout (o manualmente) |
+| POST | `/mercadopago/webhook` | **público** | Notificaciones de Mercado Pago — sin JWT, registrado fuera del router de auth |
 | GET | `/order/:orderId` | ✅ | Ver pago de un pedido |
 
 ### 🏍️ Repartidores — `/drivers`
@@ -199,6 +217,36 @@ GET /health → { status: "ok", pid: 1234, timestamp: "..." }
 
 ---
 
+## 💳 Integración con Mercado Pago
+
+Se usa **Checkout Pro** (redirección al sitio de Mercado Pago, no embebido):
+
+1. El frontend crea el pedido y llama a `POST /payments/mercadopago/preference`.
+2. El backend crea un `Payment` en estado `PENDING` y una *preferencia* en MP (`mercadopago.service.js`), usando el id de ese `Payment` como `external_reference`.
+3. El frontend redirige al usuario a la URL de pago (`init_point`) que devuelve MP.
+4. MP redirige de vuelta a `FRONTEND_URL/payment/success|pending|failure?orderId=...`.
+5. La página de retorno llama a `POST /payments/mercadopago/sync`, que **siempre re-consulta a la API de MP** (nunca confía en los query params de la URL) y actualiza el `Payment`/`Order` en la BD.
+6. En paralelo, MP también llama a `POST /payments/mercadopago/webhook` (ruta pública, sin JWT) — sirve como confirmación redundante/asíncrona, idempotente con el paso anterior.
+
+### ⚠️ Limitación en desarrollo local
+Mercado Pago **no puede alcanzar `localhost`**, así que en local:
+- El webhook nunca llega → no pasa nada, es normal.
+- `auto_return` se desactiva automáticamente para URLs `localhost` (MP lo rechaza con el error `auto_return invalid. back_url.success must be defined`), así que tras pagar verás un botón "Volver al sitio" en vez de una redirección automática — o en algunos flujos, ni siquiera ese botón.
+- Si el usuario nunca vuelve por la `back_url`, usa el botón **"Verificar pago"** en el detalle del pedido (`/orders/:id`) — busca el pago en MP por `external_reference` sin depender de haber vuelto por la URL correcta.
+
+Para probar el flujo de redirección automática completo (igual que en producción), expón tu backend con [ngrok](https://ngrok.com) y usa esa URL como `BACKEND_URL`/`FRONTEND_URL` mientras pruebas.
+
+### Tarjetas de prueba (sandbox)
+| Tarjeta | Número | CVV | Vencimiento |
+|---|---|---|---|
+| Visa | `4009 1753 3280 6176` | `123` | `11/30` |
+| Mastercard | `5031 7557 3453 0604` | `123` | `11/30` |
+
+El campo **"Nombre y apellido del titular"** determina el resultado (no es un nombre real):
+`APRO` = aprobado · `CONT` = pendiente · `FUND` = rechazado (fondos) · `OTHE` = rechazado (genérico)
+
+---
+
 ## 🗄️ Modelos principales
 
 ```
@@ -206,7 +254,7 @@ User              → rol: CONSUMER | RESTAURANT_OWNER | DELIVERY | ADMIN
 Restaurant        → pertenece a un User (OWNER), tiene Products y Orders
 Product           → pertenece a un Restaurant, tiene ProductCategory
 Order             → tipo DELIVERY | RESERVATION, estados: PENDING → DELIVERED
-Payment           → métodos: CULQI_CARD | YAPE | CASH_ON_DELIVERY
+Payment           → métodos: MERCADOPAGO | YAPE | CASH_ON_DELIVERY
 DeliveryDriver    → perfil de repartidor vinculado a User
 ConsumerProfile   → perfil de cliente con direcciones guardadas
 ```
@@ -248,7 +296,11 @@ AUTH0_AUDIENCE=https://tu-api.com
 NODE_ENV=production
 PORT=4000
 FRONTEND_URL=https://tu-frontend.vercel.app
+BACKEND_URL=https://tu-backend.onrender.com     # debe ser pública (webhook de MP)
 DB_POOL_SIZE=10
+SUNAT_API_URL=https://apiperu.dev/api/ruc
+SUNAT_API_TOKEN=...
+MERCADOPAGO_ACCESS_TOKEN=APP_USR-...            # credenciales de PRODUCCIÓN, no TEST-
 ```
 
 ### Plataformas recomendadas
