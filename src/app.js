@@ -10,6 +10,7 @@ import restaurantsRouter from './modules/restaurants/restaurants.routes.js'
 import productsRouter    from './modules/products/products.routes.js'
 import ordersRouter      from './modules/orders/orders.routes.js'
 import paymentsRouter    from './modules/payments/payments.routes.js'
+import { mpWebhook }     from './modules/payments/payments.controller.js'
 import adminRouter       from './modules/admin/admin.routes.js'
 import driversRouter     from './modules/drivers/drivers.routes.js'
 
@@ -84,6 +85,12 @@ app.use('/api/v1/auth',        authLimiter, authRouter)
 app.use('/api/v1/restaurants', restaurantsRouter)
 app.use('/api/v1/products',    productsRouter)
 app.use('/api/v1/orders',      ordersRouter)
+
+// Webhook de Mercado Pago — PÚBLICO, sin JWT (lo llaman los servidores de MP).
+// Debe registrarse antes que el router autenticado de payments para no
+// pasar por el middleware authenticate().
+app.post('/api/v1/payments/mercadopago/webhook', mpWebhook)
+
 app.use('/api/v1/payments',    paymentsRouter)
 app.use('/api/v1/admin',       adminRouter)
 app.use('/api/v1/drivers',     driversRouter)

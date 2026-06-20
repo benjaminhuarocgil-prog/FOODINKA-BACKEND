@@ -90,7 +90,7 @@ export async function registerRestaurant(req, res) {
         ownerId: userId,
         name, ruc, category, description,
         address, district, phone,
-        status: 'PENDING',
+        status: 'PENDING_VERIFICATION',
         isDeliveryEnabled:    true,
         isReservationEnabled: true,
         deliveryFee:          0,

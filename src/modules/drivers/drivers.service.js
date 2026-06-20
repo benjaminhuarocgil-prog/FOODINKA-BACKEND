@@ -9,8 +9,11 @@ export async function register(userId, body) {
   const existing = await prisma.deliveryDriver.findUnique({ where: { userId } })
   if (existing) throw new AppError('Ya tienes un perfil de repartidor', 409)
 
-  if (!licenseNumber) throw new AppError('El número de carné de conducir es requerido', 400)
-  if (!licensePhotoUrl) throw new AppError('La foto del carné de conducir es requerida', 400)
+  // El carné de conducir solo es obligatorio para vehículos motorizados
+  const requiresLicense = ['MOTORCYCLE', 'CAR'].includes(vehicleType || 'MOTORCYCLE')
+
+  if (requiresLicense && !licenseNumber)   throw new AppError('El número de carné de conducir es requerido', 400)
+  if (requiresLicense && !licensePhotoUrl) throw new AppError('La foto del carné de conducir es requerida', 400)
   if (!dni) throw new AppError('El DNI es requerido', 400)
 
   // Cambiar rol del usuario
@@ -25,8 +28,8 @@ export async function register(userId, body) {
       vehicleType:     vehicleType     || 'MOTORCYCLE',
       licensePlate:    licensePlate    || null,
       dni,
-      licenseNumber,
-      licensePhotoUrl,
+      licenseNumber:   licenseNumber   || null,
+      licensePhotoUrl: licensePhotoUrl || null,
       dniPhotoUrl:     dniPhotoUrl     || null,
       vehiclePhotoUrl: vehiclePhotoUrl || null,
       status:          'OFFLINE',
