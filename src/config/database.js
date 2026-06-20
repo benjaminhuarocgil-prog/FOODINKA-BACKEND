@@ -8,10 +8,28 @@ import { PrismaClient } from '@prisma/client'
 const CONNECTION_LIMIT = parseInt(process.env.DB_POOL_SIZE || '10')
 
 // La DATABASE_URL debe incluir el pooler de Supabase para producción:
-// postgresql://user:pass@db.xxx.supabase.co:6543/postgres?pgbouncer=true&connection_limit=10
+// postgresql://user:pass@db.xxx.supabase.co:6543/postgres?pgbouncer=true
 // ⚠️  Usar puerto 6543 (Transaction Pooler), NO 5432.
 // ⚠️  El parámetro pgbouncer=true desactiva prepared statements en Prisma,
 //     lo que es obligatorio cuando se usa PgBouncer (Supabase Pooler).
+//
+// connection_limit se agrega programáticamente abajo — antes este valor
+// solo se usaba para el mensaje de log, pero nunca se aplicaba de verdad,
+// así que Prisma usaba su propio default (num_cpus*2+1, ~3-5 en instancias
+// pequeñas) en vez del valor configurado. Con 100 usuarios concurrentes,
+// ese pool por defecto se agota rápido y las queries empiezan a hacer cola.
+function buildDatabaseUrl() {
+  const base = process.env.DATABASE_URL
+  if (!base) return base
+  const url = new URL(base)
+  if (!url.searchParams.has('connection_limit')) {
+    url.searchParams.set('connection_limit', String(CONNECTION_LIMIT))
+  }
+  if (!url.searchParams.has('pool_timeout')) {
+    url.searchParams.set('pool_timeout', '20') // segundos de espera antes de error
+  }
+  return url.toString()
+}
 
 const globalForPrisma = globalThis
 
@@ -23,7 +41,7 @@ export const prisma =
       : ['error'],
     datasources: {
       db: {
-        url: process.env.DATABASE_URL,
+        url: buildDatabaseUrl(),
       },
     },
   })

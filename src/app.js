@@ -16,6 +16,16 @@ import driversRouter     from './modules/drivers/drivers.routes.js'
 
 const app = express()
 
+// ── 0. Confiar en el proxy (Render / Railway / Fly.io) ────────────
+// CRÍTICO: sin esto, Express ve la IP del proxy reverso para TODAS las
+// requests (siempre la misma), no la IP real de cada visitante. Eso hace
+// que el rate limiter de abajo agrupe a TODOS los usuarios bajo un solo
+// "cliente" — con 100 usuarios reales, la app entera se quedaría sin cuota
+// (300 req/min) casi de inmediato, sin que sea un problema de capacidad real.
+// '1' = confiar en el primer proxy (correcto para Render/Railway, que están
+// detrás de un único balanceador). En local no afecta nada.
+app.set('trust proxy', 1)
+
 // ── 1. Compresión gzip — reduce hasta 70% el payload ─────────────
 app.use(compression({ level: 6, threshold: 1024 }))
 

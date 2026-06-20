@@ -85,6 +85,7 @@ model User {
   driverProfile   DeliveryDriver?
   consumerProfile ConsumerProfile?
 
+  @@index([role])
   @@map("users")
 }
 
@@ -119,6 +120,9 @@ model Restaurant {
   categories ProductCategory[]
   orders     Order[]
 
+  @@index([status, createdAt])
+  @@index([category])
+  @@index([district])
   @@map("restaurants")
 }
 
@@ -132,6 +136,7 @@ model ProductCategory {
 
   products Product[]
 
+  @@index([restaurantId])
   @@map("product_categories")
 }
 
@@ -155,6 +160,8 @@ model Product {
 
   orderItems OrderItem[]
 
+  @@index([restaurantId, isAvailable])
+  @@index([categoryId])
   @@map("products")
 }
 
@@ -200,6 +207,11 @@ model Order {
   savedAddressId String?
   savedAddress   SavedAddress? @relation(fields: [savedAddressId], references: [id], onDelete: SetNull)
 
+  @@index([userId, createdAt])
+  @@index([restaurantId, createdAt])
+  @@index([status, type, driverId])
+  @@index([driverId])
+  @@index([createdAt])
   @@map("orders")
 }
 
@@ -233,6 +245,8 @@ model Payment {
   orderId String @unique
   order   Order  @relation(fields: [orderId], references: [id])
 
+  @@index([status, createdAt])
+  @@index([method])
   @@map("payments")
 }
 
@@ -269,6 +283,8 @@ model DeliveryDriver {
   orders   Order[]
   earnings DriverEarning[]
 
+  @@index([status])
+  @@index([isVerified])
   @@map("delivery_drivers")
 }
 

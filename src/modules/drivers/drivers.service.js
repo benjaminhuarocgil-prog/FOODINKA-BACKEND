@@ -89,7 +89,7 @@ export async function updateVehicle(userId, { vehicleType, licensePlate }) {
   const driver = await prisma.deliveryDriver.findUnique({ where: { userId } })
   if (!driver) throw new AppError('Perfil de repartidor no encontrado', 404)
  
-  const valid = ['MOTORCYCLE', 'BICYCLE', 'CAR', 'WALKING']
+  const valid = ['MOTORCYCLE', 'BICYCLE', 'CAR', 'ON_FOOT']
   if (vehicleType && !valid.includes(vehicleType)) {
     throw new AppError('Tipo de vehículo inválido', 400)
   }
