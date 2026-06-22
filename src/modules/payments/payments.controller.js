@@ -52,16 +52,20 @@ export async function syncMp(req, res) {
   res.json({ success: true, data })
 }
 
-// POST /api/v1/payments/mercadopago/webhook  (público — lo llama Mercado Pago)
+// POST /api/v1/payments/mercadopago/webhook?restaurantId=...  (público — lo llama Mercado Pago)
 // IMPORTANTE: esta ruta NO pasa por el middleware de autenticación.
+// restaurantId viene en la query porque lo agregamos nosotros mismos al
+// crear la preferencia (ver mercadopago.service.js) — así sabemos con el
+// token de QUÉ restaurante hay que consultar este pago.
 export async function mpWebhook(req, res) {
   try {
     const mpPaymentId = req.body?.data?.id || req.query?.['data.id'] || req.query?.id
     const type = req.body?.type || req.query?.type || req.query?.topic
+    const restaurantId = req.query?.restaurantId
 
     // Solo nos interesan notificaciones de tipo "payment"
-    if (type === 'payment' && mpPaymentId) {
-      await svc.processMercadoPagoUpdate(mpPaymentId)
+    if (type === 'payment' && mpPaymentId && restaurantId) {
+      await svc.processMercadoPagoUpdate(restaurantId, mpPaymentId)
     }
 
     // Mercado Pago solo necesita un 200 para no reintentar.

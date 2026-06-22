@@ -113,6 +113,16 @@ model Restaurant {
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
 
+  // ── Conexión OAuth con la cuenta de Mercado Pago del restaurante ──
+  // Tokens guardados ENCRIPTADOS (ver shared/utils/crypto.util.js).
+  // Sin esto, no se puede cobrar con Mercado Pago a nombre de este
+  // restaurante — el checkout oculta esa opción si mpConnected=false.
+  mpConnected      Boolean   @default(false)
+  mpUserId         String?
+  mpAccessToken    String?   @db.Text
+  mpRefreshToken   String?   @db.Text
+  mpTokenExpiresAt DateTime?
+
   ownerId String     @unique
   owner   User       @relation(fields: [ownerId], references: [id])
 

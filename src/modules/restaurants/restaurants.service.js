@@ -1,5 +1,7 @@
 import { prisma } from '../../config/database.js'
 import { AppError } from '../../shared/utils/appError.js'
+import { encrypt, decrypt } from '../../shared/utils/crypto.util.js'
+import * as mpOauth from '../../shared/services/mercadopago-oauth.service.js'
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -22,6 +24,7 @@ const RESTAURANT_SELECT = {
   minOrderAmount: true,
   estimatedTime: true,
   commissionRate: true,
+  mpConnected: true, // el checkout lo usa para mostrar/ocultar la opción de Mercado Pago
   createdAt: true,
   _count: {
     select: { orders: true, products: true },
@@ -80,7 +83,9 @@ export async function list(query) {
 export async function getOne(id) {
   const restaurant = await prisma.restaurant.findUnique({
     where: { id },
-    include: {
+    select: {
+      ...RESTAURANT_SELECT,
+      ruc: true,
       owner: { select: { id: true, name: true, email: true } },
       categories: {
         orderBy: { order: 'asc' },
@@ -91,7 +96,8 @@ export async function getOne(id) {
           },
         },
       },
-      _count: { select: { orders: true } },
+      // mpAccessToken / mpRefreshToken NUNCA deben salir de aquí — al usar
+      // `select` explícito (en vez de `include`) quedan excluidos por defecto.
     },
   })
 
@@ -216,4 +222,101 @@ export async function deleteCategory(restaurantId, categoryId, ownerId, role) {
 
   // Los productos de la categoría quedan sin categoría (SetNull en schema)
   await prisma.productCategory.delete({ where: { id: categoryId } })
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Conexión OAuth con Mercado Pago (split payments / marketplace)
+// ═══════════════════════════════════════════════════════════════
+
+// ── Iniciar conexión: devuelve la URL a la que redirigir al dueño ──
+export async function getMpAuthUrl(restaurantId) {
+  return mpOauth.getAuthorizationUrl(restaurantId)
+}
+
+// ── Callback de MP: canjea el código y guarda los tokens encriptados ──
+export async function handleMpCallback(code, state) {
+  const restaurantId = mpOauth.verifyState(state) // lanza si el state es inválido/expiró
+
+  const { accessToken, refreshToken, mpUserId, expiresIn } =
+    await mpOauth.exchangeCodeForToken(code)
+
+  await prisma.restaurant.update({
+    where: { id: restaurantId },
+    data: {
+      mpConnected:      true,
+      mpUserId,
+      mpAccessToken:    encrypt(accessToken),
+      mpRefreshToken:   encrypt(refreshToken),
+      mpTokenExpiresAt: new Date(Date.now() + expiresIn * 1000),
+    },
+  })
+
+  return restaurantId
+}
+
+// ── Desconectar (el dueño puede revocar el acceso) ────────────
+export async function disconnectMp(restaurantId, ownerId) {
+  const restaurant = await prisma.restaurant.findUnique({
+    where: { id: restaurantId },
+    select: { ownerId: true },
+  })
+  if (!restaurant) throw new AppError('Restaurante no encontrado', 404)
+  if (restaurant.ownerId !== ownerId) throw new AppError('Sin permisos', 403)
+
+  await prisma.restaurant.update({
+    where: { id: restaurantId },
+    data: {
+      mpConnected:      false,
+      mpUserId:         null,
+      mpAccessToken:    null,
+      mpRefreshToken:   null,
+      mpTokenExpiresAt: null,
+    },
+  })
+}
+
+// ── Obtener un access_token válido para cobrar (lo refresca si está
+//    por vencer) — usado por payments.service.js al crear preferencias
+//    y al consultar pagos de este restaurante. ──────────────────
+export async function getValidMpAccessToken(restaurantId) {
+  const restaurant = await prisma.restaurant.findUnique({
+    where: { id: restaurantId },
+    select: {
+      mpConnected: true,
+      mpAccessToken: true,
+      mpRefreshToken: true,
+      mpTokenExpiresAt: true,
+    },
+  })
+
+  if (!restaurant?.mpConnected || !restaurant.mpAccessToken) {
+    throw new AppError(
+      'Este restaurante todavía no conectó su cuenta de Mercado Pago.',
+      400,
+      'MP_NOT_CONNECTED'
+    )
+  }
+
+  const expiresInMs = restaurant.mpTokenExpiresAt - Date.now()
+  const TEN_DAYS_MS = 10 * 24 * 60 * 60 * 1000
+
+  // Tokens OAuth de MP duran ~180 días — refrescamos con margen amplio
+  // (10 días antes de vencer) para no quedarnos sin acceso a mitad de cobro.
+  if (expiresInMs > TEN_DAYS_MS) {
+    return decrypt(restaurant.mpAccessToken)
+  }
+
+  const refreshToken = decrypt(restaurant.mpRefreshToken)
+  const refreshed = await mpOauth.refreshAccessToken(refreshToken)
+
+  await prisma.restaurant.update({
+    where: { id: restaurantId },
+    data: {
+      mpAccessToken:    encrypt(refreshed.accessToken),
+      mpRefreshToken:   encrypt(refreshed.refreshToken),
+      mpTokenExpiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
+    },
+  })
+
+  return refreshed.accessToken
 }

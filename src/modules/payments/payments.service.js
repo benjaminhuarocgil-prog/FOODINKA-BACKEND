@@ -1,9 +1,17 @@
 //  Pagos en efectivo / Yape: flujo simulado (sin pasarela real todavía).
-//  Pagos con tarjeta: integrados con Mercado Pago (Checkout Pro).
+//  Pagos con tarjeta: Mercado Pago en modo MARKETPLACE (split 1:1) —
+//  cada restaurante cobra en SU PROPIA cuenta (conectada vía OAuth) y
+//  nuestra comisión (Restaurant.commissionRate) se acredita sola en la
+//  cuenta de la plataforma gracias al parámetro marketplace_fee.
 // ─────────────────────────────────────────────────────────────
 import { prisma } from '../../config/database.js'
 import { AppError } from '../../shared/utils/appError.js'
-import { createPreference, getPayment as getMpPayment, searchByExternalReference } from '../../shared/services/mercadopago.service.js'
+import {
+  createPreference,
+  getPayment as getMpPayment,
+  searchByExternalReference,
+} from '../../shared/services/mercadopago.service.js'
+import { getValidMpAccessToken } from '../restaurants/restaurants.service.js'
 
 // ── Simulador de pasarela de pago (Yape / Efectivo) ───────────
 // Retorna: { approved: true/false, transactionId, metadata }
@@ -89,13 +97,14 @@ export async function charge({ orderId, method, phoneNumber, userId }) {
   }
 }
 
-// ── Crear preferencia de Mercado Pago (Checkout Pro) ──────────
+// ── Crear preferencia de Mercado Pago (Checkout Pro, split 1:1) ──
 export async function createMercadoPagoPreference({ orderId, userId }) {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
     include: {
       payment: true,
       user: { select: { id: true, name: true, email: true } },
+      restaurant: { select: { id: true, commissionRate: true, mpConnected: true } },
     },
   })
 
@@ -105,6 +114,21 @@ export async function createMercadoPagoPreference({ orderId, userId }) {
   if (order.status === 'CANCELLED') {
     throw new AppError('No se puede pagar un pedido cancelado', 400)
   }
+  if (!order.restaurant.mpConnected) {
+    throw new AppError(
+      'Este restaurante todavía no aceptan pagos con Mercado Pago. Elige otro método.',
+      400,
+      'MP_NOT_CONNECTED'
+    )
+  }
+
+  // Token de OAuth DEL RESTAURANTE — el cobro se hace en su cuenta, no en la
+  // nuestra. Se refresca automáticamente si está por vencer.
+  const accessToken = await getValidMpAccessToken(order.restaurant.id)
+
+  // Nuestra comisión: se descuenta del lado del restaurante y se acredita
+  // sola en nuestra cuenta de Mercado Pago al momento del pago.
+  const marketplaceFee = order.total * order.restaurant.commissionRate
 
   // Registro PENDING — su id va como external_reference en MP para poder
   // identificar el pago cuando llegue el webhook o se haga el sync.
@@ -120,10 +144,13 @@ export async function createMercadoPagoPreference({ orderId, userId }) {
 
   try {
     const { id: preferenceId, initPoint } = await createPreference({
-      paymentId:   payment.id,
-      orderId:     order.id,
-      orderNumber: order.orderNumber,
-      amount:      order.total,
+      accessToken,
+      paymentId:     payment.id,
+      orderId:       order.id,
+      orderNumber:   order.orderNumber,
+      restaurantId:  order.restaurant.id,
+      amount:        order.total,
+      marketplaceFee,
       payer: {
         name:  order.user.name,
         email: order.user.email,
@@ -132,7 +159,7 @@ export async function createMercadoPagoPreference({ orderId, userId }) {
 
     await prisma.payment.update({
       where: { id: payment.id },
-      data:  { metadata: { preferenceId } },
+      data:  { metadata: { preferenceId, marketplaceFee } },
     })
 
     return { paymentId: payment.id, initPoint, preferenceId }
@@ -166,10 +193,16 @@ function mapMpStatus(mpStatus) {
 // Usado tanto por el webhook como por el endpoint de sync manual.
 // SIEMPRE re-consulta a la API de MP con el id recibido — nunca confía
 // en datos que vengan solo del body de la notificación (evita spoofing).
-export async function processMercadoPagoUpdate(mpPaymentId) {
-  if (!mpPaymentId) return null
+//
+// restaurantId es obligatorio en el modelo marketplace: cada pago vive en
+// la cuenta DEL RESTAURANTE, así que necesitamos su access_token (no uno
+// global) para poder consultarlo.
+export async function processMercadoPagoUpdate(restaurantId, mpPaymentId) {
+  if (!mpPaymentId || !restaurantId) return null
 
-  const mpPayment = await getMpPayment(mpPaymentId)
+  const accessToken = await getValidMpAccessToken(restaurantId)
+  const mpPayment = await getMpPayment(accessToken, mpPaymentId)
+
   const ourPaymentId = mpPayment.external_reference
   if (!ourPaymentId) return null
 
@@ -208,24 +241,31 @@ export async function processMercadoPagoUpdate(mpPaymentId) {
 // a la back_url al redirigir de vuelta — es la primera vez que lo conocemos,
 // por eso no podemos depender únicamente de payment.transactionId.
 export async function syncMercadoPago({ orderId, userId, mpPaymentId }) {
-  const payment = await prisma.payment.findUnique({ where: { orderId } })
-  if (!payment)                throw new AppError('Pago no encontrado', 404)
-
-  const order = await prisma.order.findUnique({ where: { id: orderId } })
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: { payment: true },
+  })
+  if (!order)                  throw new AppError('Pedido no encontrado', 404)
   if (order.userId !== userId) throw new AppError('Sin permisos', 403)
+
+  const payment = order.payment
+  if (!payment) throw new AppError('Pago no encontrado', 404)
+
+  const restaurantId = order.restaurantId
 
   const idToCheck = mpPaymentId || payment.transactionId
   if (idToCheck) {
-    return (await processMercadoPagoUpdate(idToCheck)) || payment
+    return (await processMercadoPagoUpdate(restaurantId, idToCheck)) || payment
   }
 
   // Nunca volvimos por la back_url y el webhook tampoco llegó (típico en
-  // desarrollo local sin ngrok) — buscamos directamente en MP por
-  // external_reference, que es el id de nuestro propio registro Payment.
-  const found = await searchByExternalReference(payment.id)
+  // desarrollo local sin ngrok) — buscamos directamente en la cuenta del
+  // restaurante por external_reference, que es el id de nuestro Payment.
+  const accessToken = await getValidMpAccessToken(restaurantId)
+  const found = await searchByExternalReference(accessToken, payment.id)
   if (!found) return payment
 
-  return (await processMercadoPagoUpdate(found.id)) || payment
+  return (await processMercadoPagoUpdate(restaurantId, found.id)) || payment
 }
 
 // ── Ver pago de un pedido ─────────────────────────────────────

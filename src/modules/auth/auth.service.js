@@ -68,7 +68,12 @@ export async function getProfile(userId) {
         },
       },
       restaurant: {
-        select: { id: true, name: true, status: true, category: true, logoUrl: true },
+        select: {
+          id: true, name: true, status: true, category: true, logoUrl: true,
+          description: true, address: true, phone: true,
+          deliveryFee: true, estimatedTime: true,
+          mpConnected: true,
+        },
       },
       driverProfile: {
         select: {

@@ -1,32 +1,36 @@
 import { MercadoPagoConfig, Preference, Payment } from 'mercadopago'
 
-// ── Cliente MP (lazy init para no romper el arranque si falta el token) ──
-let _client = null
-function getClient() {
-  if (!process.env.MERCADOPAGO_ACCESS_TOKEN) {
-    throw new Error('MERCADOPAGO_ACCESS_TOKEN no está configurado en el .env')
+// ── Cliente MP por restaurante ────────────────────────────────────
+// Modelo Marketplace: cada cobro se hace con el access_token DEL
+// RESTAURANTE (obtenido por OAuth — ver mercadopago-oauth.service.js),
+// no con un token único de la plataforma. Por eso ya no existe un
+// cliente global: se construye uno por llamada, con el token recibido.
+function buildClient(accessToken) {
+  if (!accessToken) {
+    throw new Error('Falta el access_token de Mercado Pago del restaurante')
   }
-  if (!_client) {
-    _client = new MercadoPagoConfig({
-      accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN,
-      options: { timeout: 8000 },
-    })
-  }
-  return _client
+  return new MercadoPagoConfig({ accessToken, options: { timeout: 8000 } })
 }
 
 /**
- * Crea una preferencia de pago (Checkout Pro).
- * Devuelve { id, initPoint } — initPoint es la URL a la que se redirige al usuario.
+ * Crea una preferencia de pago (Checkout Pro) en la cuenta del RESTAURANTE,
+ * con un marketplace_fee que MP transfiere automáticamente a la cuenta de
+ * la plataforma al momento del pago (split 1:1).
  *
  * @param {object} params
- * @param {string} params.paymentId      ID de nuestro registro Payment (va como external_reference)
- * @param {string} params.orderNumber    Número del pedido, para mostrar en el resumen de MP
- * @param {number} params.amount         Monto total a cobrar
+ * @param {string} params.accessToken     Access token del restaurante (OAuth)
+ * @param {string} params.paymentId       ID de nuestro registro Payment (va como external_reference)
+ * @param {string} params.orderId         ID del pedido (para las back_urls)
+ * @param {string} params.orderNumber     Número del pedido, para mostrar en el resumen de MP
+ * @param {number} params.amount          Monto total a cobrar (lo paga el cliente)
+ * @param {number} params.marketplaceFee  Tu comisión — se descuenta del lado del restaurante
+ *                                        y se acredita sola en TU cuenta de Mercado Pago.
  * @param {{name?:string, email?:string}} params.payer
  */
-export async function createPreference({ paymentId, orderId, orderNumber, amount, payer }) {
-  const client = getClient()
+export async function createPreference({
+  accessToken, paymentId, orderId, orderNumber, restaurantId, amount, marketplaceFee, payer,
+}) {
+  const client = buildClient(accessToken)
   const preference = new Preference(client)
 
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173'
@@ -59,9 +63,14 @@ export async function createPreference({ paymentId, orderId, orderNumber, amount
         pending: `${frontendUrl}/payment/pending?orderId=${orderId}`,
       },
       ...(isPublicUrl && { auto_return: 'approved' }),
-      external_reference: paymentId,
-      notification_url:   `${backendUrl}/api/v1/payments/mercadopago/webhook`,
+      external_reference:   paymentId,
+      // restaurantId va en la query del webhook — así, cuando llegue la
+      // notificación, sabemos de inmediato con el token de QUÉ restaurante
+      // hay que consultar el pago (patrón recomendado por MP para
+      // integraciones con múltiples cuentas conectadas vía OAuth).
+      notification_url:     `${backendUrl}/api/v1/payments/mercadopago/webhook?restaurantId=${restaurantId}`,
       statement_descriptor: 'ANTOJIA',
+      marketplace_fee:      Number(marketplaceFee.toFixed(2)),
     },
   })
 
@@ -74,8 +83,8 @@ export async function createPreference({ paymentId, orderId, orderNumber, amount
  * usuario nunca volvió por la back_url y el webhook tampoco llegó (típico
  * en desarrollo local sin ngrok).
  */
-export async function searchByExternalReference(externalReference) {
-  const client = new Payment(getClient())
+export async function searchByExternalReference(accessToken, externalReference) {
+  const client = new Payment(buildClient(accessToken))
   const result = await client.search({
     options: { external_reference: externalReference, sort: 'date_created', criteria: 'desc' },
   })
@@ -86,8 +95,11 @@ export async function searchByExternalReference(externalReference) {
  * Obtiene el detalle real de un pago directamente desde los servidores de MP.
  * Nunca confiamos en el body del webhook por sí solo — siempre re-consultamos
  * con el id recibido, para evitar notificaciones falsificadas.
+ *
+ * Debe usarse el access_token del MISMO restaurante en cuya cuenta se creó
+ * el pago (el de la plataforma ya no sirve para esto en el modelo Marketplace).
  */
-export async function getPayment(mpPaymentId) {
-  const client = new Payment(getClient())
+export async function getPayment(accessToken, mpPaymentId) {
+  const client = new Payment(buildClient(accessToken))
   return client.get({ id: mpPaymentId })
 }
