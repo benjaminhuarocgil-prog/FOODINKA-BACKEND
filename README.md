@@ -17,10 +17,6 @@ API REST del marketplace gastronómico **Antojia**, construida con Node.js, Expr
 | express-rate-limit | 7.x | Rate limiting |
 | compression | 1.x | Compresión gzip |
 | Morgan | 1.x | Logging HTTP |
-| Zod | 3.x | Validación de esquemas |
-| Winston | 3.x | Logging estructurado |
-| Nodemailer | 8.x | Envío de emails |
-| Mercado Pago SDK | 2.x | Pasarela de pagos (Checkout Pro) |
 
 ---
 
@@ -36,7 +32,7 @@ backend/
 │   ├── app.js               # Configuración Express (middlewares, rutas)
 │   ├── server.js            # Entrada principal + cluster
 │   ├── config/
-│   │   ├── database.js      # Cliente Prisma + connection pool
+│   │   ├── database.js      # Cliente Prisma + connection pool (compatible PgBouncer)
 │   │   ├── auth0.js         # Verificación de tokens Auth0
 │   │   └── cache.js         # Cache en memoria (user sessions)
 │   ├── middleware/
@@ -46,13 +42,10 @@ backend/
 │   │   ├── restaurants/     # CRUD restaurantes + categorías
 │   │   ├── products/        # CRUD productos del menú
 │   │   ├── orders/          # Pedidos delivery y reservas
-│   │   ├── payments/        # Procesamiento de pagos (Mercado Pago / Yape / Efectivo)
+│   │   ├── payments/        # Procesamiento de pagos
 │   │   ├── drivers/         # Repartidores y asignación
 │   │   └── admin/           # Panel administrativo
 │   └── shared/
-│       ├── services/
-│       │   ├── sunat.service.js        # Verificación de RUC (apiperu.dev)
-│       │   └── mercadopago.service.js  # Preferencias, búsqueda y consulta de pagos
 │       └── utils/           # AppError, helpers
 └── package.json
 ```
@@ -63,10 +56,10 @@ backend/
 
 ### 1. Requisitos previos
 - Node.js ≥ 18
-- Cuenta en [Supabase](https://supabase.com) (PostgreSQL)
+- Cuenta en [Supabase](https://supabase.com)
 - Cuenta en [Auth0](https://auth0.com)
 
-### 2. Clonar e instalar dependencias
+### 2. Instalar dependencias
 ```bash
 git clone <repo>
 cd backend
@@ -78,240 +71,115 @@ npm install
 cp .env.example .env
 ```
 
-Edita `.env` con tus credenciales:
-
 ```env
-# Base de datos — usa el Transaction Pooler de Supabase (puerto 6543)
-DATABASE_URL="postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres?pgbouncer=true"
+# Base de datos — Transaction Pooler de Supabase (puerto 6543, NO 5432)
+DATABASE_URL="postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=10"
 
 # Auth0
-AUTH0_DOMAIN=tu-tenant.auth0.com
-AUTH0_AUDIENCE=https://tu-api.com
+AUTH0_DOMAIN=dev-xxxx.us.auth0.com
+AUTH0_AUDIENCE=https://tu-api-identifier
 
 # Servidor
 PORT=4000
 NODE_ENV=development
 FRONTEND_URL=http://localhost:5173
-BACKEND_URL=http://localhost:4000   # usado para el webhook de Mercado Pago
-
-# SUNAT — verificación de RUC (proveedor: apiperu.dev)
-SUNAT_API_URL=https://apiperu.dev/api/ruc
-SUNAT_API_TOKEN=tu_token_de_apiperu.dev
-
-# Mercado Pago — Checkout Pro
-# Credenciales de prueba: https://www.mercadopago.com.pe/developers/panel/app
-MERCADOPAGO_ACCESS_TOKEN=TEST-xxxxxxxxxxxxxxxx
 ```
 
-> 💡 Ver `.env.example` para la lista completa y comentada de todas las variables.
+> ⚠️ El parámetro `pgbouncer=true` es obligatorio. Sin él Prisma usa prepared statements que PgBouncer no soporta y el servidor lanza el error `42P05`.
 
 ### 4. Inicializar la base de datos
 ```bash
-# Crear tablas según el schema
-npm run db:push
-
-# Cargar datos de prueba básicos
-npm run db:seed
-
-# Cargar datos completos (15 restaurantes + 20 repartidores)
-node prisma/seed_full.js
+npm run db:push       # Crear tablas
+npm run db:seed       # Datos básicos
+node prisma/seed_full.js  # 15 restaurantes + 20 repartidores
 ```
 
 ### 5. Correr en desarrollo
 ```bash
 npm run dev
 ```
-
 El servidor inicia en `http://localhost:4000`
 
 ---
 
-## 📡 Endpoints de la API
+## 📡 Endpoints principales
 
 Base URL: `http://localhost:4000/api/v1`
 
-### 🔐 Auth — `/auth`
-| Método | Ruta | Auth | Descripción |
-|---|---|---|---|
-| POST | `/sync` | ✅ | Sincroniza usuario de Auth0 con la BD |
-| GET | `/me` | ✅ | Perfil del usuario autenticado |
-| PATCH | `/me` | ✅ | Actualizar nombre / teléfono |
-| PATCH | `/users/:id/role` | ADMIN | Cambiar rol de usuario |
-| POST | `/register-restaurant` | ✅ | Registrar restaurante (cambia rol a OWNER) |
-
-### 🍽️ Restaurantes — `/restaurants`
-| Método | Ruta | Auth | Descripción |
-|---|---|---|---|
-| GET | `/` | — | Listar restaurantes activos |
-| GET | `/:id` | — | Detalle de un restaurante |
-| POST | `/` | OWNER | Crear restaurante |
-| PUT | `/:id` | OWNER | Actualizar restaurante |
-| GET | `/verify-ruc/:ruc` | — | Verificar RUC en SUNAT |
-| GET | `/:id/categories` | — | Categorías del restaurante |
-| POST | `/:id/categories` | OWNER | Crear categoría |
-| DELETE | `/:id/categories/:catId` | OWNER | Eliminar categoría |
-| PATCH | `/:id/verify` | ADMIN | Verificar restaurante |
-| PATCH | `/:id/suspend` | ADMIN | Suspender restaurante |
-
-### 🥗 Productos — `/products`
-| Método | Ruta | Auth | Descripción |
-|---|---|---|---|
-| GET | `/restaurant/:id` | — | Listar productos de un restaurante |
-| GET | `/:id` | — | Detalle de un producto |
-| POST | `/restaurant/:id` | OWNER | Crear producto |
-| PUT | `/:id` | OWNER | Actualizar producto |
-| PATCH | `/:id/availability` | OWNER | Toggle disponibilidad |
-| PATCH | `/:id/discount` | OWNER | Aplicar descuento |
-| DELETE | `/:id` | OWNER | Eliminar producto |
-
-### 📦 Pedidos — `/orders`
-| Método | Ruta | Auth | Descripción |
-|---|---|---|---|
-| POST | `/` | ✅ | Crear pedido (delivery o reserva) |
-| GET | `/my` | ✅ | Mis pedidos |
-| GET | `/:id` | ✅ | Detalle de pedido |
-| PATCH | `/:id/cancel` | ✅ | Cancelar pedido |
-| GET | `/restaurant/:id` | OWNER | Pedidos del restaurante |
-| PATCH | `/:id/status` | OWNER | Actualizar estado del pedido |
-| PATCH | `/:id/assign-driver` | ADMIN | Asignar repartidor |
-
-### 💳 Pagos — `/payments`
-| Método | Ruta | Auth | Descripción |
-|---|---|---|---|
-| POST | `/charge` | ✅ | Pagar con Yape o Efectivo al recibir |
-| POST | `/mercadopago/preference` | ✅ | Crear preferencia de Mercado Pago (Checkout Pro) — devuelve la URL de pago |
-| POST | `/mercadopago/sync` | ✅ | Sincronizar el estado real del pago al volver del checkout (o manualmente) |
-| POST | `/mercadopago/webhook` | **público** | Notificaciones de Mercado Pago — sin JWT, registrado fuera del router de auth |
-| GET | `/order/:orderId` | ✅ | Ver pago de un pedido |
-
-### 🏍️ Repartidores — `/drivers`
-| Método | Ruta | Auth | Descripción |
-|---|---|---|---|
-| POST | `/register` | ✅ | Registrarse como repartidor |
-| GET | `/orders/available` | DELIVERY | Ver pedidos disponibles |
-| PATCH | `/location` | DELIVERY | Actualizar ubicación GPS |
-| PATCH | `/status` | DELIVERY | Cambiar estado (AVAILABLE/OFFLINE) |
-| PATCH | `/vehicle` | DELIVERY | Actualizar tipo de vehículo y placa |
-
-### ⚙️ Admin — `/admin`
-| Método | Ruta | Auth | Descripción |
-|---|---|---|---|
-| GET | `/metrics` | ADMIN | Métricas generales |
-| GET | `/metrics/revenue` | ADMIN | Gráfica de ingresos |
-| GET | `/users` | ADMIN | Listar usuarios |
-| PATCH | `/users/:id/role` | ADMIN | Cambiar rol |
-| PATCH | `/users/:id/toggle` | ADMIN | Activar / suspender usuario |
-| GET | `/restaurants` | ADMIN | Listar restaurantes |
-| PATCH | `/restaurants/:id/verify` | ADMIN | Verificar restaurante |
-| PATCH | `/restaurants/:id/suspend` | ADMIN | Suspender restaurante |
-| GET | `/orders` | ADMIN | Listar todos los pedidos |
-| GET | `/payments` | ADMIN | Listar todos los pagos |
-| GET | `/drivers` | ADMIN | Listar repartidores |
-| PATCH | `/drivers/:id/verify` | ADMIN | Verificar repartidor |
-| PATCH | `/drivers/:id/suspend` | ADMIN | Suspender repartidor |
-
-### 🩺 Health check
-```
-GET /health → { status: "ok", pid: 1234, timestamp: "..." }
-```
+| Módulo | Base | Descripción |
+|---|---|---|
+| Auth | `/auth` | Perfil, sincronización, registro de restaurante |
+| Restaurantes | `/restaurants` | CRUD + verificación RUC |
+| Productos | `/products` | Menú del restaurante |
+| Pedidos | `/orders` | Delivery y reservas |
+| Pagos | `/payments` | Culqi, Yape, efectivo |
+| Repartidores | `/drivers` | Pedidos, ubicación, vehículo |
+| Admin | `/admin` | Panel de gestión completo |
+| Health | `/health` | Estado del servidor |
 
 ---
 
-## 💳 Integración con Mercado Pago
-
-Se usa **Checkout Pro** (redirección al sitio de Mercado Pago, no embebido):
-
-1. El frontend crea el pedido y llama a `POST /payments/mercadopago/preference`.
-2. El backend crea un `Payment` en estado `PENDING` y una *preferencia* en MP (`mercadopago.service.js`), usando el id de ese `Payment` como `external_reference`.
-3. El frontend redirige al usuario a la URL de pago (`init_point`) que devuelve MP.
-4. MP redirige de vuelta a `FRONTEND_URL/payment/success|pending|failure?orderId=...`.
-5. La página de retorno llama a `POST /payments/mercadopago/sync`, que **siempre re-consulta a la API de MP** (nunca confía en los query params de la URL) y actualiza el `Payment`/`Order` en la BD.
-6. En paralelo, MP también llama a `POST /payments/mercadopago/webhook` (ruta pública, sin JWT) — sirve como confirmación redundante/asíncrona, idempotente con el paso anterior.
-
-### ⚠️ Limitación en desarrollo local
-Mercado Pago **no puede alcanzar `localhost`**, así que en local:
-- El webhook nunca llega → no pasa nada, es normal.
-- `auto_return` se desactiva automáticamente para URLs `localhost` (MP lo rechaza con el error `auto_return invalid. back_url.success must be defined`), así que tras pagar verás un botón "Volver al sitio" en vez de una redirección automática — o en algunos flujos, ni siquiera ese botón.
-- Si el usuario nunca vuelve por la `back_url`, usa el botón **"Verificar pago"** en el detalle del pedido (`/orders/:id`) — busca el pago en MP por `external_reference` sin depender de haber vuelto por la URL correcta.
-
-Para probar el flujo de redirección automática completo (igual que en producción), expón tu backend con [ngrok](https://ngrok.com) y usa esa URL como `BACKEND_URL`/`FRONTEND_URL` mientras pruebas.
-
-### Tarjetas de prueba (sandbox)
-| Tarjeta | Número | CVV | Vencimiento |
-|---|---|---|---|
-| Visa | `4009 1753 3280 6176` | `123` | `11/30` |
-| Mastercard | `5031 7557 3453 0604` | `123` | `11/30` |
-
-El campo **"Nombre y apellido del titular"** determina el resultado (no es un nombre real):
-`APRO` = aprobado · `CONT` = pendiente · `FUND` = rechazado (fondos) · `OTHE` = rechazado (genérico)
-
----
-
-## 🗄️ Modelos principales
-
-```
-User              → rol: CONSUMER | RESTAURANT_OWNER | DELIVERY | ADMIN
-Restaurant        → pertenece a un User (OWNER), tiene Products y Orders
-Product           → pertenece a un Restaurant, tiene ProductCategory
-Order             → tipo DELIVERY | RESERVATION, estados: PENDING → DELIVERED
-Payment           → métodos: MERCADOPAGO | YAPE | CASH_ON_DELIVERY
-DeliveryDriver    → perfil de repartidor vinculado a User
-ConsumerProfile   → perfil de cliente con direcciones guardadas
-```
-
----
-
-## 🔑 Roles y permisos
+## 🔑 Roles
 
 | Rol | Acceso |
 |---|---|
-| `CONSUMER` | Crear pedidos, ver su historial, gestionar perfil |
-| `RESTAURANT_OWNER` | CRUD de su restaurante y menú, gestionar pedidos entrantes |
-| `DELIVERY` | Ver pedidos disponibles, actualizar ubicación y estado |
-| `ADMIN` | Acceso completo al panel de administración |
+| `CONSUMER` | Crear pedidos, historial, perfil |
+| `RESTAURANT_OWNER` | CRUD menú, gestionar pedidos entrantes |
+| `DELIVERY` | Pedidos disponibles, ubicación, vehículo |
+| `ADMIN` | Acceso completo |
 
 ---
 
-## ⚡ Scripts disponibles
+## ⚡ Scripts
 
 ```bash
-npm run dev          # Desarrollo con hot-reload (nodemon)
+npm run dev          # Desarrollo con hot-reload
 npm run start        # Producción
-npm run db:push      # Aplicar schema a la BD
+npm run db:push      # Aplicar schema
 npm run db:seed      # Seed básico
-npm run db:studio    # Abrir Prisma Studio (GUI de BD)
+npm run db:studio    # Prisma Studio (GUI de BD)
 npm run db:generate  # Regenerar cliente Prisma
-npm run db:reset     # Reset completo de BD + seed
+npm run db:reset     # Reset completo + seed
 ```
 
 ---
 
-## 🚢 Despliegue en producción
+## 🚢 Despliegue en producción (Render)
 
-### Variables de entorno requeridas
+### Variables de entorno en Render
+
 ```env
-DATABASE_URL=postgresql://...?pgbouncer=true    # Transaction Pooler Supabase
-AUTH0_DOMAIN=tu-tenant.auth0.com
-AUTH0_AUDIENCE=https://tu-api.com
+DATABASE_URL=postgresql://...?pgbouncer=true&connection_limit=10
+AUTH0_DOMAIN=dev-xxxx.us.auth0.com
+AUTH0_AUDIENCE=https://tu-api-identifier
 NODE_ENV=production
-PORT=4000
-FRONTEND_URL=https://tu-frontend.vercel.app
-BACKEND_URL=https://tu-backend.onrender.com     # debe ser pública (webhook de MP)
+PORT=10000
+FRONTEND_URL=https://tu-app.netlify.app
 DB_POOL_SIZE=10
-SUNAT_API_URL=https://apiperu.dev/api/ruc
-SUNAT_API_TOKEN=...
-MERCADOPAGO_ACCESS_TOKEN=APP_USR-...            # credenciales de PRODUCCIÓN, no TEST-
 ```
 
-### Plataformas recomendadas
-- **Railway** — despliegue directo desde GitHub, soporte a cluster
-- **Render** — plan gratuito disponible
-- **Fly.io** — bajo latencia en Latinoamérica
+> ⚠️ Render asigna el puerto automáticamente vía `process.env.PORT`. No uses un puerto fijo en producción.
 
-El servidor usa `cluster` de Node.js en producción para aprovechar todos los CPUs disponibles y reiniciar workers caídos automáticamente.
+### Start command en Render
+```
+node src/server.js
+```
+
+### Build command en Render
+```
+npm install && npx prisma generate
+```
+
+### Inicializar BD en Render (una sola vez)
+Desde el Shell de Render:
+```bash
+npx prisma db push
+node prisma/seed.js
+node prisma/seed_full.js
+```
 
 ---
 
 ## 📄 Licencia
 
-Proyecto — Qoribex © 2026
+Proyecto académico — Antojia © 2025
