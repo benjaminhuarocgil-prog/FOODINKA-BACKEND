@@ -182,4 +182,4 @@ node prisma/seed_full.js
 
 ## 📄 Licencia
 
-Proyecto académico — Antojia © 2025
+Qoribex — Antojia © 2025
