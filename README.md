@@ -83,6 +83,14 @@ AUTH0_AUDIENCE=https://tu-api-identifier
 PORT=4000
 NODE_ENV=development
 FRONTEND_URL=http://localhost:5173
+BACKEND_URL=http://localhost:4000
+
+# Cuenta central de Mercado Pago (cobros reales)
+MERCADOPAGO_ACCESS_TOKEN=tu_access_token_de_produccion
+MERCADOPAGO_WEBHOOK_SECRET=tu_firma_secreta_del_webhook
+
+# Checkout Pro sandbox (opcional, habilita el botón de prueba)
+MERCADOPAGO_TEST_ACCESS_TOKEN=tu_access_token_de_prueba
 ```
 
 > ⚠️ El parámetro `pgbouncer=true` es obligatorio. Sin él Prisma usa prepared statements que PgBouncer no soporta y el servidor lanza el error `42P05`.
@@ -191,7 +199,12 @@ AUTH0_AUDIENCE=https://tu-api-identifier
 NODE_ENV=production
 PORT=10000
 FRONTEND_URL=https://tu-app.netlify.app
+BACKEND_URL=https://tu-backend.onrender.com
 DB_POOL_SIZE=10
+WEB_CONCURRENCY=1
+MERCADOPAGO_ACCESS_TOKEN=tu_access_token_de_produccion
+MERCADOPAGO_WEBHOOK_SECRET=tu_firma_secreta_del_webhook
+MERCADOPAGO_TEST_ACCESS_TOKEN=tu_access_token_de_prueba
 ```
 
 > ⚠️ Render asigna el puerto automáticamente vía `process.env.PORT`. No uses un puerto fijo en producción.

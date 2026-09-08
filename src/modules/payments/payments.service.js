@@ -1,8 +1,6 @@
 //  Pagos en efectivo / Yape: flujo simulado (sin pasarela real todavía).
-//  Pagos con tarjeta: Mercado Pago en modo MARKETPLACE (split 1:1) —
-//  cada restaurante cobra en SU PROPIA cuenta (conectada vía OAuth) y
-//  nuestra comisión (Restaurant.commissionRate) se acredita sola en la
-//  cuenta de la plataforma gracias al parámetro marketplace_fee.
+//  Pagos con tarjeta: Mercado Pago Checkout Pro con una sola cuenta central.
+//  Ningún restaurante guarda ni configura credenciales de Mercado Pago.
 // ─────────────────────────────────────────────────────────────
 import { prisma } from '../../config/database.js'
 import { AppError } from '../../shared/utils/appError.js'
@@ -11,7 +9,47 @@ import {
   getPayment as getMpPayment,
   searchByExternalReference,
 } from '../../shared/services/mercadopago.service.js'
-import { getValidMpAccessToken } from '../restaurants/restaurants.service.js'
+
+function getMercadoPagoAccessToken(testMode = false) {
+  const accessToken = testMode
+    ? process.env.MERCADOPAGO_TEST_ACCESS_TOKEN
+    : process.env.MERCADOPAGO_ACCESS_TOKEN
+
+  if (!accessToken) {
+    throw new AppError(
+      testMode
+        ? 'Mercado Pago de prueba no está configurado.'
+        : 'Mercado Pago no está configurado en la plataforma.',
+      503,
+      testMode ? 'MP_TEST_NOT_CONFIGURED' : 'MP_NOT_CONFIGURED'
+    )
+  }
+
+  return accessToken
+}
+
+function buildSettlementMetadata(payment, commissionRate, newStatus) {
+  if (newStatus !== 'PAID') return {}
+
+  const grossAmount = Number(payment.amount)
+  const rate = Number(commissionRate || 0)
+  const commissionAmount = Number((grossAmount * rate).toFixed(2))
+  const netAmount = Number((grossAmount - commissionAmount).toFixed(2))
+  const releaseDate = new Date()
+  releaseDate.setDate(releaseDate.getDate() + 7)
+
+  return {
+    settlement: {
+      grossAmount,
+      commissionRate: rate,
+      commissionAmount,
+      netAmount,
+      status: 'PENDING',
+      fundsReleased: false,
+      releaseDate: releaseDate.toISOString(),
+    },
+  }
+}
 
 // ── Simulador de pasarela de pago (Yape / Efectivo) ───────────
 // Retorna: { approved: true/false, transactionId, metadata }
@@ -97,14 +135,14 @@ export async function charge({ orderId, method, phoneNumber, userId }) {
   }
 }
 
-// ── Crear preferencia de Mercado Pago (Checkout Pro, split 1:1) ──
+// ── Crear preferencia con la cuenta central de Mercado Pago ──────
 export async function createMercadoPagoPreference({ orderId, userId }) {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
     include: {
       payment: true,
       user: { select: { id: true, name: true, email: true } },
-      restaurant: { select: { id: true, commissionRate: true, mpConnected: true } },
+      restaurant: { select: { id: true } },
     },
   })
 
@@ -114,21 +152,7 @@ export async function createMercadoPagoPreference({ orderId, userId }) {
   if (order.status === 'CANCELLED') {
     throw new AppError('No se puede pagar un pedido cancelado', 400)
   }
-  if (!order.restaurant.mpConnected) {
-    throw new AppError(
-      'Este restaurante todavía no aceptan pagos con Mercado Pago. Elige otro método.',
-      400,
-      'MP_NOT_CONNECTED'
-    )
-  }
-
-  // Token de OAuth DEL RESTAURANTE — el cobro se hace en su cuenta, no en la
-  // nuestra. Se refresca automáticamente si está por vencer.
-  const accessToken = await getValidMpAccessToken(order.restaurant.id)
-
-  // Nuestra comisión: se descuenta del lado del restaurante y se acredita
-  // sola en nuestra cuenta de Mercado Pago al momento del pago.
-  const marketplaceFee = order.total * order.restaurant.commissionRate
+  const accessToken = getMercadoPagoAccessToken()
 
   // Registro PENDING — su id va como external_reference en MP para poder
   // identificar el pago cuando llegue el webhook o se haga el sync.
@@ -148,9 +172,7 @@ export async function createMercadoPagoPreference({ orderId, userId }) {
       paymentId:     payment.id,
       orderId:       order.id,
       orderNumber:   order.orderNumber,
-      restaurantId:  order.restaurant.id,
       amount:        order.total,
-      marketplaceFee,
       payer: {
         name:  order.user.name,
         email: order.user.email,
@@ -159,7 +181,7 @@ export async function createMercadoPagoPreference({ orderId, userId }) {
 
     await prisma.payment.update({
       where: { id: payment.id },
-      data:  { metadata: { preferenceId, marketplaceFee } },
+      data:  { metadata: { mode: 'PRODUCTION', preferenceId } },
     })
 
     return { paymentId: payment.id, initPoint, preferenceId }
@@ -171,6 +193,73 @@ export async function createMercadoPagoPreference({ orderId, userId }) {
     })
     console.error('[payments.service] Error creando preferencia de Mercado Pago:', error.message)
     throw new AppError('No se pudo iniciar el pago con Mercado Pago. Intenta de nuevo.', 503, 'MP_ERROR')
+  }
+}
+
+// ── Checkout Pro sandbox de la plataforma ───────────────────────
+// Flujo independiente para QA: no exige que el restaurante conecte su
+// cuenta por OAuth y no reemplaza los pagos simulados existentes.
+export async function createMercadoPagoTestPreference({ orderId, userId }) {
+  const accessToken = getMercadoPagoAccessToken(true)
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: {
+      payment: true,
+      user: { select: { id: true, name: true, email: true } },
+      restaurant: { select: { id: true } },
+    },
+  })
+
+  if (!order)                  throw new AppError('Pedido no encontrado', 404)
+  if (order.userId !== userId) throw new AppError('Sin permisos', 403)
+  if (order.payment)           throw new AppError('Este pedido ya tiene un pago registrado', 409, 'ALREADY_PAID')
+  if (order.status === 'CANCELLED') {
+    throw new AppError('No se puede pagar un pedido cancelado', 400)
+  }
+
+  const payment = await prisma.payment.create({
+    data: {
+      orderId,
+      method:   'MERCADOPAGO',
+      status:   'PENDING',
+      amount:   order.total,
+      currency: 'PEN',
+      metadata: { mode: 'TEST' },
+    },
+  })
+
+  try {
+    const { id: preferenceId, initPoint } = await createPreference({
+      accessToken,
+      paymentId:    payment.id,
+      orderId:      order.id,
+      orderNumber:  order.orderNumber,
+      amount:       order.total,
+      payer: {
+        name:  order.user.name,
+        email: order.user.email,
+      },
+      testMode: true,
+    })
+
+    await prisma.payment.update({
+      where: { id: payment.id },
+      data: { metadata: { mode: 'TEST', preferenceId } },
+    })
+
+    return { paymentId: payment.id, initPoint, preferenceId, testMode: true }
+  } catch (error) {
+    await prisma.payment.update({
+      where: { id: payment.id },
+      data: { status: 'FAILED', metadata: { mode: 'TEST', error: error.message } },
+    })
+    console.error('[payments.service] Error creando preferencia sandbox:', error.message)
+    throw new AppError(
+      'No se pudo iniciar Mercado Pago de prueba. Revisa la credencial sandbox.',
+      503,
+      'MP_TEST_ERROR'
+    )
   }
 }
 
@@ -194,19 +283,25 @@ function mapMpStatus(mpStatus) {
 // SIEMPRE re-consulta a la API de MP con el id recibido — nunca confía
 // en datos que vengan solo del body de la notificación (evita spoofing).
 //
-// restaurantId es obligatorio en el modelo marketplace: cada pago vive en
-// la cuenta DEL RESTAURANTE, así que necesitamos su access_token (no uno
-// global) para poder consultarlo.
-export async function processMercadoPagoUpdate(restaurantId, mpPaymentId) {
-  if (!mpPaymentId || !restaurantId) return null
+export async function processMercadoPagoUpdate(mpPaymentId, { testMode = false } = {}) {
+  if (!mpPaymentId) return null
 
-  const accessToken = await getValidMpAccessToken(restaurantId)
+  const accessToken = getMercadoPagoAccessToken(testMode)
   const mpPayment = await getMpPayment(accessToken, mpPaymentId)
 
   const ourPaymentId = mpPayment.external_reference
   if (!ourPaymentId) return null
 
-  const payment = await prisma.payment.findUnique({ where: { id: ourPaymentId } })
+  const payment = await prisma.payment.findUnique({
+    where: { id: ourPaymentId },
+    include: {
+      order: {
+        select: {
+          restaurant: { select: { commissionRate: true } },
+        },
+      },
+    },
+  })
   if (!payment) return null
 
   // Idempotencia: si ya estaba PAID/REFUNDED, no reprocesar
@@ -222,6 +317,11 @@ export async function processMercadoPagoUpdate(restaurantId, mpPaymentId) {
       mpStatus:        mpPayment.status,
       mpStatusDetail:  mpPayment.status_detail,
       mpPaymentMethod: mpPayment.payment_method_id,
+      ...buildSettlementMetadata(
+        payment,
+        payment.order.restaurant.commissionRate,
+        newStatus
+      ),
     },
     ...(newStatus === 'PAID' && { paidAt: new Date() }),
   }
@@ -251,21 +351,21 @@ export async function syncMercadoPago({ orderId, userId, mpPaymentId }) {
   const payment = order.payment
   if (!payment) throw new AppError('Pago no encontrado', 404)
 
-  const restaurantId = order.restaurantId
+  const testMode = payment.metadata?.mode === 'TEST'
 
   const idToCheck = mpPaymentId || payment.transactionId
   if (idToCheck) {
-    return (await processMercadoPagoUpdate(restaurantId, idToCheck)) || payment
+    return (await processMercadoPagoUpdate(idToCheck, { testMode })) || payment
   }
 
   // Nunca volvimos por la back_url y el webhook tampoco llegó (típico en
-  // desarrollo local sin ngrok) — buscamos directamente en la cuenta del
-  // restaurante por external_reference, que es el id de nuestro Payment.
-  const accessToken = await getValidMpAccessToken(restaurantId)
+  // desarrollo local sin ngrok) — buscamos directamente en la cuenta central
+  // por external_reference, que es el id de nuestro Payment.
+  const accessToken = getMercadoPagoAccessToken(testMode)
   const found = await searchByExternalReference(accessToken, payment.id)
   if (!found) return payment
 
-  return (await processMercadoPagoUpdate(restaurantId, found.id)) || payment
+  return (await processMercadoPagoUpdate(found.id, { testMode })) || payment
 }
 
 // ── Ver pago de un pedido ─────────────────────────────────────

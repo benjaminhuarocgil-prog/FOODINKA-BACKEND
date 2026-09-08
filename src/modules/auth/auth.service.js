@@ -72,7 +72,6 @@ export async function getProfile(userId) {
           id: true, name: true, status: true, category: true, logoUrl: true,
           description: true, address: true, phone: true,
           deliveryFee: true, estimatedTime: true,
-          mpConnected: true,
         },
       },
       driverProfile: {
