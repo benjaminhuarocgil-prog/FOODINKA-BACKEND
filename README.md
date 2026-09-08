@@ -91,6 +91,9 @@ MERCADOPAGO_WEBHOOK_SECRET=tu_firma_secreta_del_webhook
 
 # Checkout Pro sandbox (opcional, habilita el botón de prueba)
 MERCADOPAGO_TEST_ACCESS_TOKEN=tu_access_token_de_prueba
+
+# Solo para pruebas sin proveedor real de SUNAT
+SUNAT_MOCK_ENABLED=true
 ```
 
 > ⚠️ El parámetro `pgbouncer=true` es obligatorio. Sin él Prisma usa prepared statements que PgBouncer no soporta y el servidor lanza el error `42P05`.
@@ -205,6 +208,7 @@ WEB_CONCURRENCY=1
 MERCADOPAGO_ACCESS_TOKEN=tu_access_token_de_produccion
 MERCADOPAGO_WEBHOOK_SECRET=tu_firma_secreta_del_webhook
 MERCADOPAGO_TEST_ACCESS_TOKEN=tu_access_token_de_prueba
+SUNAT_MOCK_ENABLED=true
 ```
 
 > ⚠️ Render asigna el puerto automáticamente vía `process.env.PORT`. No uses un puerto fijo en producción.

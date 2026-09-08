@@ -43,10 +43,23 @@ export async function verifyRuc(ruc) {
     throw new AppError('Formato de RUC inválido. Debe tener 11 dígitos y comenzar con 10, 15, 17 ó 20.', 400, 'INVALID_RUC_FORMAT')
   }
 
-  // --- Modo desarrollo sin API configurada: devolver respuesta simulada ---
+  // Modo de prueba explícito: permite probar el registro también en Render
+  // sin eliminar ni reemplazar la integración real con SUNAT.
+  const mockEnabled = process.env.SUNAT_MOCK_ENABLED?.toLowerCase() === 'true'
+  if (mockEnabled) {
+    return {
+      ruc,
+      razonSocial: `EMPRESA DE PRUEBA ${ruc} SAC`,
+      estado: 'ACTIVO',
+      condicion: 'HABIDO',
+      mock: true,
+    }
+  }
+
+  // En desarrollo local se mantiene el fallback simulado existente.
   if (!process.env.SUNAT_API_URL) {
     if (process.env.NODE_ENV !== 'production') {
-      return { ruc, razonSocial: 'EMPRESA DE PRUEBA SAC', estado: 'ACTIVO', condicion: 'HABIDO' }
+      return { ruc, razonSocial: 'EMPRESA DE PRUEBA SAC', estado: 'ACTIVO', condicion: 'HABIDO', mock: true }
     }
     throw new AppError('Servicio de consulta RUC no configurado.', 503, 'SUNAT_NOT_CONFIGURED')
   }
