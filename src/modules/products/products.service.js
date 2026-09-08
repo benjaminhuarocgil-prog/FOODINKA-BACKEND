@@ -100,12 +100,38 @@ export async function create(restaurantId, userId, role, body) {
     throw new AppError('El descuento debe estar entre 0 y 100', 400)
   }
 
-  // Si tiene categoryId verificar que pertenece al restaurante
-  if (categoryId) {
+  // Si tiene categoryId verificar que pertenece al restaurante. Cuando el
+  // formulario no envía una categoría, usar/crear una categoría general para
+  // que el producto también sea visible en el menú público.
+  let resolvedCategoryId = categoryId || null
+  if (resolvedCategoryId) {
     const cat = await prisma.productCategory.findFirst({
-      where: { id: categoryId, restaurantId },
+      where: { id: resolvedCategoryId, restaurantId },
     })
     if (!cat) throw new AppError('Categoría no encontrada en este restaurante', 404)
+  } else {
+    let defaultCategory = await prisma.productCategory.findFirst({
+      where: { restaurantId, name: 'Menú' },
+      select: { id: true },
+    })
+
+    if (!defaultCategory) {
+      const lastCategory = await prisma.productCategory.findFirst({
+        where: { restaurantId },
+        orderBy: { order: 'desc' },
+        select: { order: true },
+      })
+      defaultCategory = await prisma.productCategory.create({
+        data: {
+          restaurantId,
+          name: 'Menú',
+          order: (lastCategory?.order ?? -1) + 1,
+        },
+        select: { id: true },
+      })
+    }
+
+    resolvedCategoryId = defaultCategory.id
   }
 
   const product = await prisma.product.create({
@@ -115,7 +141,7 @@ export async function create(restaurantId, userId, role, body) {
       type,
       price,
       discountPct: discountPct || 0,
-      categoryId:  categoryId  || null,
+      categoryId:  resolvedCategoryId,
       imageUrl:    imageUrl    || null,
       isAvailable: true,
       restaurantId,
@@ -143,6 +169,14 @@ export async function update(id, userId, role, body) {
 
   if (price !== undefined && price <= 0) {
     throw new AppError('El precio debe ser mayor a 0', 400)
+  }
+
+  if (categoryId !== undefined && categoryId !== null) {
+    const category = await prisma.productCategory.findFirst({
+      where: { id: categoryId, restaurantId: product.restaurantId },
+      select: { id: true },
+    })
+    if (!category) throw new AppError('Categoría no encontrada en este restaurante', 404)
   }
 
   const updated = await prisma.product.update({

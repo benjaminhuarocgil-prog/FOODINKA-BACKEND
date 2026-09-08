@@ -93,12 +93,24 @@ export async function getOne(id) {
           },
         },
       },
+      // Recupera productos antiguos creados antes de exigir una categoría.
+      products: {
+        where: { categoryId: null, isAvailable: true },
+        orderBy: { name: 'asc' },
+      },
       // El select explícito evita exponer campos internos del restaurante.
     },
   })
 
   if (!restaurant) throw new AppError('Restaurante no encontrado', 404)
-  return restaurant
+
+  const { products: uncategorizedProducts, categories, ...restaurantData } = restaurant
+  return {
+    ...restaurantData,
+    categories: uncategorizedProducts.length > 0
+      ? [{ id: 'uncategorized', name: 'Menú', products: uncategorizedProducts }, ...categories]
+      : categories,
+  }
 }
 
 // ── Crear restaurante ─────────────────────────────────────────
