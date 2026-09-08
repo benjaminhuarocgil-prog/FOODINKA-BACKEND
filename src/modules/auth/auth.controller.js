@@ -1,10 +1,12 @@
 import * as authService from './auth.service.js'
 import { prisma } from '../../config/database.js'
+import { getIdentityClaims } from '../../config/auth0.js'
 import { AppError } from '../../shared/utils/appError.js'
 
 // POST /api/v1/auth/sync
 export async function sync(req, res) {
-  const { sub: auth0Id, email, name, picture } = req.auth.payload
+  const { sub: auth0Id } = req.auth.payload
+  const { email, name, picture } = getIdentityClaims(req.auth.payload)
 
   const { user, isNew } = await authService.syncUser({
     auth0Id,

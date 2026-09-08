@@ -1,0 +1,12 @@
+.git
+.gitignore
+.idea
+.env
+.env.*
+node_modules
+npm-debug.log*
+logs
+coverage
+dist
+tmp
+*.md

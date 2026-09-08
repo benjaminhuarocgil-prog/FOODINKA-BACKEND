@@ -119,6 +119,42 @@ Base URL: `http://localhost:4000/api/v1`
 
 ---
 
+## 🐳 Ejecución con Docker
+
+El archivo `docker-compose.yaml` levanta el backend y el frontend juntos. La
+base de datos continúa alojada en Neon y las imágenes en Supabase; Compose lee
+las variables existentes de los archivos `.env` de ambos repositorios.
+
+### Requisito
+
+- Docker Desktop con Docker Compose v2
+
+### Iniciar el proyecto
+
+Ejecuta desde la carpeta `FOODINKA-BACKEND`:
+
+```powershell
+docker compose --env-file "..\FOODINKA-FRONTEND\.env" up --build
+```
+
+Servicios disponibles:
+
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:4000`
+- Health check: `http://localhost:4000/health`
+
+Para detenerlos:
+
+```powershell
+docker compose down
+```
+
+Los archivos `.env` no se copian dentro de las imágenes. Las variables
+`VITE_*` se incorporan al frontend durante la etapa de compilación porque Vite
+genera archivos estáticos.
+
+---
+
 ## 🔑 Roles
 
 | Rol | Acceso |

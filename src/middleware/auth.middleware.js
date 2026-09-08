@@ -1,4 +1,4 @@
-import { verifyToken } from '../config/auth0.js'
+import { verifyToken, getIdentityClaims } from '../config/auth0.js'
 import { prisma }      from '../config/database.js'
 import { cacheGet, cacheSet, cacheDel } from '../config/cache.js'
 
@@ -55,9 +55,10 @@ export async function loadUser(req, res, next) {
     }
 
     // ── Cache miss: ir a la BD ─────────────────────────────────
-    const email   = req.auth.payload['email']   || ''
-    const name    = req.auth.payload['name']    || email.split('@')[0] || 'Usuario'
-    const picture = req.auth.payload['picture'] || null
+    const claims  = getIdentityClaims(req.auth.payload)
+    const email   = claims.email
+    const name    = claims.name || email.split('@')[0] || 'Usuario'
+    const picture = claims.picture
 
     const user = await findOrCreateUser(auth0Id, email, name, picture)
 
