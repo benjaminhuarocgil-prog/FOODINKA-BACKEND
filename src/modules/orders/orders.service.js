@@ -4,7 +4,7 @@ import { AppError } from '../../shared/utils/appError.js'
 // ── Include reutilizable ──────────────────────────────────────
 const ORDER_INCLUDE = {
   user:       { select: { id: true, name: true, email: true, phone: true } },
-  restaurant: { select: { id: true, name: true, address: true, district: true, phone: true } },
+  restaurant: { select: { id: true, name: true, address: true, district: true, phone: true, latitude: true, longitude: true, ownerId: true } },
   items: {
     include: {
       product: { select: { id: true, name: true, type: true, imageUrl: true } },
@@ -52,6 +52,7 @@ export async function create(userId, body) {
   const {
     restaurantId, type, items, notes,
     savedAddressId, deliveryAddress, deliveryDistrict, deliveryPhone, deliveryNotes,
+    deliveryLatitude, deliveryLongitude,
     reservationDate, reservationTime, partySize,
   } = body
 
@@ -100,9 +101,15 @@ export async function create(userId, body) {
       savedAddressId,
       deliveryAddress:  saved.address,
       deliveryDistrict: saved.district,
+      deliveryLatitude: saved.latitude,
+      deliveryLongitude: saved.longitude,
     }
   } else if (type === 'DELIVERY') {
-    addressData = { deliveryAddress, deliveryDistrict, deliveryPhone, deliveryNotes }
+    addressData = {
+      deliveryAddress, deliveryDistrict, deliveryPhone, deliveryNotes,
+      deliveryLatitude: deliveryLatitude == null ? null : Number(deliveryLatitude),
+      deliveryLongitude: deliveryLongitude == null ? null : Number(deliveryLongitude),
+    }
   }
 
   // Resolver productos
@@ -298,7 +305,13 @@ export async function updateStatus(id, userId, role, newStatus) {
   // Al entregar, actualizar métricas del repartidor
   const updated = await prisma.$transaction(async tx => {
     const updatedOrder = await tx.order.update({
-      where: { id }, data: { status: newStatus }, include: ORDER_INCLUDE,
+      where: { id },
+      data: {
+        status: newStatus,
+        ...(newStatus === 'ON_THE_WAY' && { pickedUpAt: new Date() }),
+        ...(newStatus === 'DELIVERED' && { deliveredAt: new Date() }),
+      },
+      include: ORDER_INCLUDE,
     })
 
     if (newStatus === 'DELIVERED' && updatedOrder.driverId) {
@@ -369,17 +382,15 @@ export async function assignDriver(orderId, userId) {
   if (!driver.isVerified)  throw new AppError('Tu perfil aún no está verificado', 403)
   if (driver.status !== 'AVAILABLE') throw new AppError('No estás disponible para tomar pedidos', 400)
 
-  const [updatedOrder] = await prisma.$transaction([
-    prisma.order.update({
-      where: { id: orderId },
-      data:  { driverId: driver.id },
-      include: ORDER_INCLUDE,
-    }),
-    prisma.deliveryDriver.update({
-      where: { id: driver.id },
-      data:  { status: 'ON_DELIVERY' },
-    }),
-  ])
-
-  return updatedOrder
+  return prisma.$transaction(async tx => {
+    const claimed = await tx.order.updateMany({
+      where: { id: orderId, type: 'DELIVERY', status: 'READY', driverId: null },
+      data: { driverId: driver.id, driverAssignedAt: new Date() },
+    })
+    if (claimed.count !== 1) {
+      throw new AppError('Este pedido acaba de ser tomado por otro repartidor', 409)
+    }
+    await tx.deliveryDriver.update({ where: { id: driver.id }, data: { status: 'ON_DELIVERY' } })
+    return tx.order.findUnique({ where: { id: orderId }, include: ORDER_INCLUDE })
+  })
 }

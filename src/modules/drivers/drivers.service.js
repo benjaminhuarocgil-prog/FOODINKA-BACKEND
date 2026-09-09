@@ -61,14 +61,35 @@ export async function availableOrders(driverId, { district }) {
   })
 }
 
+export async function activeOrders(userId) {
+  const driver = await prisma.deliveryDriver.findUnique({ where: { userId }, select: { id: true } })
+  if (!driver) throw new AppError('Perfil de repartidor no encontrado', 404)
+
+  return prisma.order.findMany({
+    where: { driverId: driver.id, type: 'DELIVERY', status: { in: ['READY', 'ON_THE_WAY'] } },
+    include: {
+      restaurant: { select: { id: true, name: true, address: true, district: true, phone: true, latitude: true, longitude: true } },
+      user: { select: { id: true, name: true, phone: true } },
+      savedAddress: true,
+      items: { include: { product: { select: { name: true } } } },
+    },
+    orderBy: { driverAssignedAt: 'asc' },
+  })
+}
+
 // ── Actualizar ubicación ──────────────────────────────────────
 export async function updateLocation(userId, { latitude, longitude }) {
+  const lat = Number(latitude)
+  const lng = Number(longitude)
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+    throw new AppError('Coordenadas inválidas', 400)
+  }
   const driver = await prisma.deliveryDriver.findUnique({ where: { userId } })
   if (!driver) throw new AppError('Perfil de repartidor no encontrado', 404)
 
   return prisma.deliveryDriver.update({
     where: { userId },
-    data:  { currentLatitude: latitude, currentLongitude: longitude, lastLocationAt: new Date() },
+    data:  { currentLatitude: lat, currentLongitude: lng, lastLocationAt: new Date() },
   })
 }
 

@@ -191,9 +191,14 @@ model Order {
 
   deliveryAddress   String?
   deliveryDistrict  String?
-  deliveryPhone     String?
-  deliveryNotes     String?  @db.Text
-  estimatedDelivery DateTime?
+    deliveryPhone     String?
+    deliveryNotes     String?  @db.Text
+    deliveryLatitude  Float?
+    deliveryLongitude Float?
+    estimatedDelivery DateTime?
+    driverAssignedAt  DateTime?
+    pickedUpAt        DateTime?
+    deliveredAt       DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
