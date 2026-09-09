@@ -40,15 +40,13 @@ export async function register(userId, body) {
 
 // ── Pedidos disponibles por zona ──────────────────────────────
 export async function availableOrders(driverId, { district }) {
-  if (!district) throw new AppError('Selecciona una zona para buscar pedidos', 400)
-
   return prisma.order.findMany({
     where: {
       type:     'DELIVERY',
       status:   'READY',          // listos para recoger
       driverId: null,             // sin repartidor asignado
       restaurant: {
-        district: { contains: district, mode: 'insensitive' },
+        ...(district && { district: { contains: district, mode: 'insensitive' } }),
         status:   'ACTIVE',
       },
     },
