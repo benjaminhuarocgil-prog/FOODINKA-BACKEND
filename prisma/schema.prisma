@@ -69,14 +69,14 @@ enum VehicleType {
 }
 
 model User {
-  id        String  @id @default(uuid())
-  auth0Id   String  @unique
-  email     String  @unique
+  id        String   @id @default(uuid())
+  auth0Id   String   @unique
+  email     String   @unique
   name      String
   phone     String?
   avatarUrl String?
-  role      Role    @default(CONSUMER)
-  isActive  Boolean @default(true)
+  role      Role     @default(CONSUMER)
+  isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -122,8 +122,8 @@ model Restaurant {
   mpRefreshToken   String?   @db.Text
   mpTokenExpiresAt DateTime?
 
-  ownerId String     @unique
-  owner   User       @relation(fields: [ownerId], references: [id])
+  ownerId String @unique
+  owner   User   @relation(fields: [ownerId], references: [id])
 
   products   Product[]
   categories ProductCategory[]
@@ -162,7 +162,7 @@ model Product {
   updatedAt   DateTime    @updatedAt
 
   restaurantId String
-  restaurant   Restaurant      @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
 
   categoryId String?
   category   ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
@@ -191,14 +191,17 @@ model Order {
 
   deliveryAddress   String?
   deliveryDistrict  String?
-    deliveryPhone     String?
-    deliveryNotes     String?  @db.Text
-    deliveryLatitude  Float?
-    deliveryLongitude Float?
-    estimatedDelivery DateTime?
-    driverAssignedAt  DateTime?
-    pickedUpAt        DateTime?
-    deliveredAt       DateTime?
+  deliveryPhone     String?
+  deliveryNotes     String?   @db.Text
+  deliveryLatitude  Float?
+  deliveryLongitude Float?
+  estimatedDelivery DateTime?
+  driverAssignedAt  DateTime?
+  pickedUpAt        DateTime?
+  deliveredAt       DateTime?
+  deliveryCode      String?
+  deliveryProofUrl  String?
+  deliveryProofAt   DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -270,8 +273,8 @@ model DeliveryDriver {
   vehicleType  VehicleType  @default(MOTORCYCLE)
   licensePlate String?
 
-  dni             String?  @unique
-  dniPhotoUrl     String?
+  dni         String? @unique
+  dniPhotoUrl String?
 
   licenseNumber   String?
   licensePhotoUrl String?

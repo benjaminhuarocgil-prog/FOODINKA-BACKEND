@@ -1,9 +1,10 @@
 import { prisma } from '../../config/database.js'
 import { AppError } from '../../shared/utils/appError.js'
+import { randomInt } from 'node:crypto'
 
 // ── Include reutilizable ──────────────────────────────────────
 const ORDER_INCLUDE = {
-  user:       { select: { id: true, name: true, email: true, phone: true } },
+  user:       { select: { id: true, name: true, email: true, phone: true, consumerProfile: { select: { totalOrders: true } } } },
   restaurant: { select: { id: true, name: true, address: true, district: true, phone: true, latitude: true, longitude: true, ownerId: true } },
   items: {
     include: {
@@ -45,6 +46,16 @@ const TRANSITIONS = {
 function calcFinalPrice(price, discountPct) {
   if (!discountPct) return price
   return parseFloat((price * (1 - discountPct / 100)).toFixed(2))
+}
+
+function generateDeliveryCode() {
+  return String(randomInt(100000, 1000000))
+}
+
+function hideDeliveryCode(order) {
+  if (!order) return order
+  const { deliveryCode: _deliveryCode, ...safeOrder } = order
+  return safeOrder
 }
 
 // ── Crear pedido ──────────────────────────────────────────────
@@ -151,6 +162,7 @@ export async function create(userId, body) {
         type, status: 'PENDING', userId, restaurantId,
         subtotal, deliveryFee, total,
         notes: notes || null,
+        ...(type === 'DELIVERY' && { deliveryCode: generateDeliveryCode() }),
         ...(consumerProfile && { consumerProfileId: consumerProfile.id }),
         ...addressData,
         ...(type === 'RESERVATION' && {
@@ -250,7 +262,7 @@ export async function getOne(id, userId, role) {
   if (!isConsumer && !isOwner && !isDriver && role !== 'ADMIN') {
     throw new AppError('No tienes permisos para ver este pedido', 403)
   }
-  return order
+  return isConsumer ? order : hideDeliveryCode(order)
 }
 
 // ── Pedidos de un restaurante ─────────────────────────────────
@@ -275,17 +287,18 @@ export async function listByRestaurant(restaurantId, userId, role, query) {
     prisma.order.count({ where }),
   ])
 
-  return { data, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } }
+  return { data: data.map(hideDeliveryCode), pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } }
 }
 
 // ── Actualizar estado ─────────────────────────────────────────
-export async function updateStatus(id, userId, role, newStatus) {
+export async function updateStatus(id, userId, role, newStatus, deliveryEvidence = {}) {
   const order = await prisma.order.findUnique({
     where: { id },
     select: {
       status: true, type: true,
       restaurant: { select: { ownerId: true } },
       driver: { select: { userId: true } },
+      deliveryCode: true,
     },
   })
   if (!order) throw new AppError('Pedido no encontrado', 404)
@@ -302,6 +315,17 @@ export async function updateStatus(id, userId, role, newStatus) {
     throw new AppError(`No se puede cambiar de ${order.status} a ${newStatus}`, 400, 'INVALID_TRANSITION')
   }
 
+  if (role === 'DELIVERY' && newStatus === 'DELIVERED') {
+    const suppliedCode = String(deliveryEvidence.deliveryCode || '').trim()
+    const proofUrl = String(deliveryEvidence.deliveryProofUrl || '').trim()
+    if (!/^\d{6}$/.test(suppliedCode) || suppliedCode !== order.deliveryCode) {
+      throw new AppError('El código de entrega es incorrecto', 400, 'INVALID_DELIVERY_CODE')
+    }
+    if (!/^https:\/\//i.test(proofUrl)) {
+      throw new AppError('Debes adjuntar una foto válida de la entrega', 400, 'DELIVERY_PROOF_REQUIRED')
+    }
+  }
+
   // Al entregar, actualizar métricas del repartidor
   const updated = await prisma.$transaction(async tx => {
     const updatedOrder = await tx.order.update({
@@ -309,7 +333,13 @@ export async function updateStatus(id, userId, role, newStatus) {
       data: {
         status: newStatus,
         ...(newStatus === 'ON_THE_WAY' && { pickedUpAt: new Date() }),
-        ...(newStatus === 'DELIVERED' && { deliveredAt: new Date() }),
+        ...(newStatus === 'DELIVERED' && {
+          deliveredAt: new Date(),
+          ...(deliveryEvidence.deliveryProofUrl && {
+            deliveryProofUrl: String(deliveryEvidence.deliveryProofUrl).trim(),
+            deliveryProofAt: new Date(),
+          }),
+        }),
       },
       include: ORDER_INCLUDE,
     })
@@ -332,7 +362,7 @@ export async function updateStatus(id, userId, role, newStatus) {
     return updatedOrder
   })
 
-  return updated
+  return hideDeliveryCode(updated)
 }
 
 // ── Cancelar pedido ───────────────────────────────────────────
@@ -368,7 +398,7 @@ export async function cancel(id, userId) {
 export async function assignDriver(orderId, userId) {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
-    select: { type: true, status: true, driverId: true },
+    select: { type: true, status: true, driverId: true, deliveryCode: true },
   })
   if (!order)                   throw new AppError('Pedido no encontrado', 404)
   if (order.type !== 'DELIVERY') throw new AppError('Solo se asigna repartidor en pedidos de delivery', 400)
@@ -385,12 +415,17 @@ export async function assignDriver(orderId, userId) {
   return prisma.$transaction(async tx => {
     const claimed = await tx.order.updateMany({
       where: { id: orderId, type: 'DELIVERY', status: 'READY', driverId: null },
-      data: { driverId: driver.id, driverAssignedAt: new Date() },
+      data: {
+        driverId: driver.id,
+        driverAssignedAt: new Date(),
+        ...(!order.deliveryCode && { deliveryCode: generateDeliveryCode() }),
+      },
     })
     if (claimed.count !== 1) {
       throw new AppError('Este pedido acaba de ser tomado por otro repartidor', 409)
     }
     await tx.deliveryDriver.update({ where: { id: driver.id }, data: { status: 'ON_DELIVERY' } })
-    return tx.order.findUnique({ where: { id: orderId }, include: ORDER_INCLUDE })
+    const assignedOrder = await tx.order.findUnique({ where: { id: orderId }, include: ORDER_INCLUDE })
+    return hideDeliveryCode(assignedOrder)
   })
 }

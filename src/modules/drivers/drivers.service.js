@@ -40,7 +40,7 @@ export async function register(userId, body) {
 
 // ── Pedidos disponibles por zona ──────────────────────────────
 export async function availableOrders(driverId, { district }) {
-  return prisma.order.findMany({
+  const orders = await prisma.order.findMany({
     where: {
       type:     'DELIVERY',
       status:   'READY',          // listos para recoger
@@ -57,13 +57,14 @@ export async function availableOrders(driverId, { district }) {
     },
     orderBy: { createdAt: 'asc' },
   })
+  return orders.map(({ deliveryCode: _deliveryCode, ...order }) => order)
 }
 
 export async function activeOrders(userId) {
   const driver = await prisma.deliveryDriver.findUnique({ where: { userId }, select: { id: true } })
   if (!driver) throw new AppError('Perfil de repartidor no encontrado', 404)
 
-  return prisma.order.findMany({
+  const orders = await prisma.order.findMany({
     where: { driverId: driver.id, type: 'DELIVERY', status: { in: ['READY', 'ON_THE_WAY'] } },
     include: {
       restaurant: { select: { id: true, name: true, address: true, district: true, phone: true, latitude: true, longitude: true } },
@@ -73,6 +74,7 @@ export async function activeOrders(userId) {
     },
     orderBy: { driverAssignedAt: 'asc' },
   })
+  return orders.map(({ deliveryCode: _deliveryCode, ...order }) => order)
 }
 
 // ── Actualizar ubicación ──────────────────────────────────────

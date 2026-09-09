@@ -37,7 +37,10 @@ export async function listByRestaurant(req, res) {
 export async function updateStatus(req, res) {
   const { status } = req.body
   if (!status) return res.status(400).json({ success: false, message: 'El campo status es requerido' })
-  const data = await svc.updateStatus(req.params.id, req.user.id, req.user.role, status)
+  const data = await svc.updateStatus(req.params.id, req.user.id, req.user.role, status, {
+    deliveryCode: req.body.deliveryCode,
+    deliveryProofUrl: req.body.deliveryProofUrl,
+  })
   res.json({ success: true, message: `Estado actualizado a ${status}`, data })
 }
 
