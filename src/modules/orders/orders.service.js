@@ -20,6 +20,9 @@ const ORDER_INCLUDE = {
   payment: {
     select: { id: true, status: true, method: true, amount: true, paidAt: true },
   },
+  driverRating: {
+    select: { score: true, comment: true, createdAt: true },
+  },
 }
 
 // ── Transiciones permitidas por rol ──────────────────────────
@@ -221,14 +224,12 @@ export async function myOrders(userId, query) {
     prisma.order.count({ where }),
   ])
 
-  // Estadísticas CRM del consumidor
-  const profile = await prisma.consumerProfile.findUnique({
-    where: { userId },
-    select: {
-      totalOrders: true,
-      totalSpent:  true,
-      favoriteCuisines: true,
-    },
+  // Las métricas se calculan desde las entregas reales. Así no dependen de
+  // que el cliente tenga (o no) un ConsumerProfile creado previamente.
+  const deliveredSummary = await prisma.order.aggregate({
+    where: { userId, status: 'DELIVERED' },
+    _count: { _all: true },
+    _sum: { total: true },
   })
 
   // Restaurantes más pedidos (CRM)
@@ -250,8 +251,8 @@ export async function myOrders(userId, query) {
     data,
     pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
     crm: {
-      totalOrders:     profile?.totalOrders    || 0,
-      totalSpent:      profile?.totalSpent     || 0,
+      totalOrders:     deliveredSummary._count._all,
+      totalSpent:      deliveredSummary._sum.total || 0,
       topRestaurants:  topRestaurantData,
     },
   }
@@ -432,5 +433,45 @@ export async function assignDriver(orderId, userId) {
     await tx.deliveryDriver.update({ where: { id: driver.id }, data: { status: 'ON_DELIVERY' } })
     const assignedOrder = await tx.order.findUnique({ where: { id: orderId }, include: ORDER_INCLUDE })
     return hideDeliveryCode(assignedOrder)
+  })
+}
+
+// ── Calificar repartidor ──────────────────────────────────────
+export async function rateDriver(orderId, userId, { score, comment }) {
+  const numericScore = Number(score)
+  if (!Number.isInteger(numericScore) || numericScore < 1 || numericScore > 5) {
+    throw new AppError('La calificación debe ser un número entero entre 1 y 5', 400)
+  }
+
+  const cleanComment = String(comment || '').trim()
+  if (cleanComment.length > 500) {
+    throw new AppError('El comentario no puede superar los 500 caracteres', 400)
+  }
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { userId: true, type: true, status: true, driverId: true, driverRating: { select: { id: true } } },
+  })
+  if (!order) throw new AppError('Pedido no encontrado', 404)
+  if (order.userId !== userId) throw new AppError('No tienes permisos para calificar este pedido', 403)
+  if (order.type !== 'DELIVERY' || order.status !== 'DELIVERED' || !order.driverId) {
+    throw new AppError('Solo puedes calificar un delivery que ya fue entregado', 400)
+  }
+  if (order.driverRating) throw new AppError('Este repartidor ya fue calificado para este pedido', 409)
+
+  return prisma.$transaction(async tx => {
+    const rating = await tx.driverRating.create({
+      data: { orderId, driverId: order.driverId, consumerId: userId, score: numericScore, comment: cleanComment || null },
+    })
+    const summary = await tx.driverRating.aggregate({
+      where: { driverId: order.driverId },
+      _avg: { score: true },
+      _count: { _all: true },
+    })
+    await tx.deliveryDriver.update({
+      where: { id: order.driverId },
+      data: { rating: summary._avg.score || 0, ratingCount: summary._count._all },
+    })
+    return rating
   })
 }

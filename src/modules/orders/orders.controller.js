@@ -55,3 +55,9 @@ export async function assignDriver(req, res) {
   const data = await svc.assignDriver(req.params.id, req.user.id)
   res.json({ success: true, message: 'Pedido tomado exitosamente', data })
 }
+
+// POST /api/v1/orders/:id/driver-rating
+export async function rateDriver(req, res) {
+  const data = await svc.rateDriver(req.params.id, req.user.id, req.body)
+  res.status(201).json({ success: true, message: 'Gracias por calificar a tu repartidor', data })
+}

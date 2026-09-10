@@ -84,6 +84,7 @@ model User {
   orders          Order[]
   driverProfile   DeliveryDriver?
   consumerProfile ConsumerProfile?
+  driverRatings   DriverRating[] @relation("DriverRatingConsumer")
 
   @@index([role])
   @@map("users")
@@ -215,6 +216,7 @@ model Order {
 
   items   OrderItem[]
   payment Payment?
+  driverRating DriverRating?
 
   driverId String?
   driver   DeliveryDriver? @relation(fields: [driverId], references: [id], onDelete: SetNull)
@@ -300,6 +302,7 @@ model DeliveryDriver {
 
   orders   Order[]
   earnings DriverEarning[]
+  ratings  DriverRating[]
 
   @@index([status])
   @@index([isVerified])
@@ -319,6 +322,27 @@ model DriverEarning {
   createdAt DateTime @default(now())
 
   @@map("driver_earnings")
+}
+
+model DriverRating {
+  id        String   @id @default(uuid())
+  score     Int
+  comment   String?  @db.Text
+  createdAt DateTime @default(now())
+
+  // Una entrega solo puede calificarse una vez.
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  driverId String
+  driver   DeliveryDriver @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  consumerId String
+  consumer   User   @relation("DriverRatingConsumer", fields: [consumerId], references: [id], onDelete: Cascade)
+
+  @@index([driverId, createdAt])
+  @@index([consumerId])
+  @@map("driver_ratings")
 }
 
 model ConsumerProfile {
