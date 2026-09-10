@@ -125,6 +125,9 @@ export async function create(userId, body) {
       deliveryLongitude: deliveryLongitude == null ? null : Number(deliveryLongitude),
     }
   }
+  if (type === 'DELIVERY' && (addressData.deliveryLatitude == null || addressData.deliveryLongitude == null || !Number.isFinite(Number(addressData.deliveryLatitude)) || !Number.isFinite(Number(addressData.deliveryLongitude)))) {
+    throw new AppError('La dirección de entrega no tiene una ubicación válida en el mapa', 400)
+  }
 
   // Resolver productos
   const productIds = items.map(i => i.productId)
@@ -328,10 +331,6 @@ export async function updateStatus(id, userId, role, newStatus, deliveryEvidence
       throw new AppError('Debes adjuntar una foto válida de la entrega', 400, 'DELIVERY_PROOF_REQUIRED')
     }
   }
-  if (type === 'DELIVERY' && (addressData.deliveryLatitude == null || addressData.deliveryLongitude == null || !Number.isFinite(Number(addressData.deliveryLatitude)) || !Number.isFinite(Number(addressData.deliveryLongitude)))) {
-    throw new AppError('La dirección de entrega no tiene una ubicación válida en el mapa', 400)
-  }
-
   // Al entregar, actualizar métricas del repartidor
   const updated = await prisma.$transaction(async tx => {
     const updatedOrder = await tx.order.update({
