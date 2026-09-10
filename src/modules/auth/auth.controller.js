@@ -50,14 +50,16 @@ export async function registerRestaurant(req, res) {
   const userId = req.user.id
   const {
     name, ruc, category, description,
-    address, district, phone,
+    address, addressReference, district, phone, latitude, longitude,
   } = req.body
  
   // Validaciones
-  if (!name || !ruc || !category || !address || !district) {
+  const lat = Number(latitude)
+  const lng = Number(longitude)
+  if (!name || !ruc || !category || !address || !district || !Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
     return res.status(400).json({
       success: false,
-      message: 'Los campos name, ruc, category, address y district son requeridos',
+      message: 'Nombre, RUC, categoría, dirección, distrito y ubicación en el mapa son requeridos',
     })
   }
   if (!/^\d{11}$/.test(ruc)) {
@@ -91,7 +93,8 @@ export async function registerRestaurant(req, res) {
       data: {
         ownerId: userId,
         name, ruc, category, description,
-        address, district, phone,
+        address, addressReference: addressReference || null, district, phone,
+        latitude: lat, longitude: lng,
         status: 'PENDING_VERIFICATION',
         isDeliveryEnabled:    true,
         isReservationEnabled: true,

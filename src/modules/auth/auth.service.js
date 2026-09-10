@@ -70,7 +70,8 @@ export async function getProfile(userId) {
       restaurant: {
         select: {
           id: true, name: true, status: true, category: true, logoUrl: true,
-          description: true, address: true, phone: true,
+          description: true, address: true, addressReference: true, district: true,
+          latitude: true, longitude: true, phone: true,
           deliveryFee: true, estimatedTime: true,
           commissionRate: true,
         },

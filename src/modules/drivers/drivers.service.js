@@ -51,7 +51,7 @@ export async function availableOrders(driverId, { district }) {
       },
     },
     include: {
-      restaurant: { select: { id: true, name: true, address: true, district: true, phone: true } },
+      restaurant: { select: { id: true, name: true, address: true, addressReference: true, district: true, phone: true, latitude: true, longitude: true } },
       user:       { select: { name: true, phone: true } },
       items:      { include: { product: { select: { name: true } } } },
     },
@@ -67,7 +67,7 @@ export async function activeOrders(userId) {
   const orders = await prisma.order.findMany({
     where: { driverId: driver.id, type: 'DELIVERY', status: { in: ['READY', 'ON_THE_WAY'] } },
     include: {
-      restaurant: { select: { id: true, name: true, address: true, district: true, phone: true, latitude: true, longitude: true } },
+      restaurant: { select: { id: true, name: true, address: true, addressReference: true, district: true, phone: true, latitude: true, longitude: true } },
       user: { select: { id: true, name: true, phone: true } },
       savedAddress: true,
       items: { include: { product: { select: { name: true } } } },

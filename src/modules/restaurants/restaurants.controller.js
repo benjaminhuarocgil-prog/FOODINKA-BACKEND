@@ -16,17 +16,19 @@ export async function getOne(req, res) {
 export async function create(req, res) {
   const {
     name, ruc, description, category,
-    address, district, phone,
+    address, addressReference, district, phone, latitude, longitude,
     isDeliveryEnabled, isReservationEnabled,
     deliveryFee, minOrderAmount, estimatedTime,
     openingHours,
   } = req.body
 
   // Validaciones básicas
-  if (!name || !ruc || !category || !address || !district) {
+  const lat = Number(latitude)
+  const lng = Number(longitude)
+  if (!name || !ruc || !category || !address || !district || !Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
     return res.status(400).json({
       success: false,
-      message: 'Los campos name, ruc, category, address y district son requeridos',
+      message: 'Nombre, RUC, categoría, dirección, distrito y ubicación en el mapa son requeridos',
     })
   }
 
@@ -39,7 +41,8 @@ export async function create(req, res) {
 
   const data = await svc.create(req.user.id, {
     name, ruc, description, category,
-    address, district, phone,
+    address, addressReference: addressReference || null, district, phone,
+    latitude: lat, longitude: lng,
     isDeliveryEnabled:    isDeliveryEnabled    ?? true,
     isReservationEnabled: isReservationEnabled ?? true,
     deliveryFee:          deliveryFee          ?? 0,

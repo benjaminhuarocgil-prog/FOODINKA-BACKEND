@@ -12,7 +12,10 @@ const RESTAURANT_SELECT = {
   logoUrl: true,
   bannerUrl: true,
   address: true,
+  addressReference: true,
   district: true,
+  latitude: true,
+  longitude: true,
   phone: true,
   openingHours: true,
   status: true,
@@ -154,6 +157,15 @@ export async function update(id, ownerId, role, body) {
 
   // No permitir cambiar el RUC
   const { ruc, ...safeBody } = body
+  if (safeBody.latitude !== undefined || safeBody.longitude !== undefined) {
+    const lat = Number(safeBody.latitude)
+    const lng = Number(safeBody.longitude)
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      throw new AppError('La ubicación del restaurante no es válida', 400)
+    }
+    safeBody.latitude = lat
+    safeBody.longitude = lng
+  }
 
   return prisma.restaurant.update({
     where: { id },

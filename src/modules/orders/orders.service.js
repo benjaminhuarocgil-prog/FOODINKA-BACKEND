@@ -5,7 +5,7 @@ import { randomInt } from 'node:crypto'
 // ── Include reutilizable ──────────────────────────────────────
 const ORDER_INCLUDE = {
   user:       { select: { id: true, name: true, email: true, phone: true, consumerProfile: { select: { totalOrders: true } } } },
-  restaurant: { select: { id: true, name: true, address: true, district: true, phone: true, latitude: true, longitude: true, ownerId: true } },
+  restaurant: { select: { id: true, name: true, address: true, addressReference: true, district: true, phone: true, latitude: true, longitude: true, ownerId: true } },
   items: {
     include: {
       product: { select: { id: true, name: true, type: true, imageUrl: true } },

@@ -98,6 +98,7 @@ model Restaurant {
   logoUrl              String?
   bannerUrl            String?
   address              String
+  addressReference     String?
   district             String
   latitude             Float?
   longitude            Float?
