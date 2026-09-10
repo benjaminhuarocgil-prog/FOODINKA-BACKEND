@@ -25,7 +25,7 @@ const ORDER_INCLUDE = {
 // ── Transiciones permitidas por rol ──────────────────────────
 const TRANSITIONS = {
   RESTAURANT_OWNER: {
-    PENDING:   ['CONFIRMED', 'CANCELLED'],
+    PENDING:   ['CONFIRMED', 'PREPARING', 'CANCELLED'],
     CONFIRMED: ['PREPARING', 'CANCELLED'],
     PREPARING: ['READY'],
   },
