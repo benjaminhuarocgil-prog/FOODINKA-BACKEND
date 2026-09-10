@@ -78,6 +78,9 @@ export async function create(userId, body) {
   if (type === 'DELIVERY' && !savedAddressId && !deliveryAddress) {
     throw new AppError('Se requiere una dirección de entrega', 400)
   }
+  if (type === 'DELIVERY' && !savedAddressId && (deliveryLatitude == null || deliveryLongitude == null)) {
+    throw new AppError('Se requiere marcar la ubicación exacta de entrega en el mapa', 400)
+  }
   if (type === 'RESERVATION' && (!reservationDate || !reservationTime || !partySize)) {
     throw new AppError('Para reservas se requiere fecha, hora y número de personas', 400)
   }
@@ -324,6 +327,9 @@ export async function updateStatus(id, userId, role, newStatus, deliveryEvidence
     if (!/^https:\/\//i.test(proofUrl)) {
       throw new AppError('Debes adjuntar una foto válida de la entrega', 400, 'DELIVERY_PROOF_REQUIRED')
     }
+  }
+  if (type === 'DELIVERY' && (addressData.deliveryLatitude == null || addressData.deliveryLongitude == null || !Number.isFinite(Number(addressData.deliveryLatitude)) || !Number.isFinite(Number(addressData.deliveryLongitude)))) {
+    throw new AppError('La dirección de entrega no tiene una ubicación válida en el mapa', 400)
   }
 
   // Al entregar, actualizar métricas del repartidor
