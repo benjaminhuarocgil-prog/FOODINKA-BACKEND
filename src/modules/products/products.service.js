@@ -225,7 +225,7 @@ export async function applyDiscount(id, userId, role, discountPct) {
 }
 
 // ── Habilitar / deshabilitar ──────────────────────────────────
-export async function toggleAvailability(id, userId, role) {
+export async function setAvailability(id, userId, role, requestedAvailability) {
   const product = await prisma.product.findUnique({
     where: { id },
     select: { restaurantId: true, isAvailable: true },
@@ -234,9 +234,13 @@ export async function toggleAvailability(id, userId, role) {
 
   await checkOwnership(product.restaurantId, userId, role)
 
+  const isAvailable = typeof requestedAvailability === 'boolean'
+    ? requestedAvailability
+    : !product.isAvailable
+
   const updated = await prisma.product.update({
     where: { id },
-    data: { isAvailable: !product.isAvailable },
+    data: { isAvailable },
     select: PRODUCT_SELECT,
   })
 

@@ -58,10 +58,14 @@ export async function applyDiscount(req, res) {
 
 // PATCH /api/v1/products/:id/availability
 export async function toggleAvailability(req, res) {
-  const data = await svc.toggleAvailability(
+  const requestedAvailability = typeof req.body?.isAvailable === 'boolean'
+    ? req.body.isAvailable
+    : undefined
+  const data = await svc.setAvailability(
     req.params.id,
     req.user.id,
-    req.user.role
+    req.user.role,
+    requestedAvailability
   )
   const msg = data.isAvailable ? 'Producto habilitado en el menú' : 'Producto ocultado del menú'
   res.json({ success: true, message: msg, data })
