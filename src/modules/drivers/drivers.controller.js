@@ -12,7 +12,7 @@ export async function register(req, res) {
 export async function availableOrders(req, res) {
   const driver = req.user.driverProfile
   if (!driver) return res.status(404).json({ success: false, message: 'Perfil de repartidor no encontrado' })
-  const data = await svc.availableOrders(driver.id, req.query)
+  const data = await svc.availableOrders()
   res.json({ success: true, data })
 }
 

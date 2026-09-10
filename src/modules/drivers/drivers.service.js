@@ -38,15 +38,16 @@ export async function register(userId, body) {
   })
 }
 
-// ── Pedidos disponibles por zona ──────────────────────────────
-export async function availableOrders(driverId, { district }) {
+// ── Bolsa global de pedidos disponibles ───────────────────────
+// Todo repartidor ve los pedidos listos que aún no fueron tomados. La
+// asignación se protege de forma atómica en orders.service.assignDriver.
+export async function availableOrders() {
   const orders = await prisma.order.findMany({
     where: {
       type:     'DELIVERY',
       status:   'READY',          // listos para recoger
       driverId: null,             // sin repartidor asignado
       restaurant: {
-        ...(district && { district: { contains: district, mode: 'insensitive' } }),
         status:   'ACTIVE',
       },
     },
