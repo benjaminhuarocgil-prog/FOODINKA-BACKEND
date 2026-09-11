@@ -15,6 +15,9 @@ router.get('/me', authenticate, ctrl.me)
 // ── Actualizar datos del perfil ──────────────────────────────
 router.patch('/me', authenticate, ctrl.updateMe)
 
+// Enlace de invitación privado para crear administradores sin SQL manual.
+router.post('/register-admin', authenticate, ctrl.registerAdmin)
+
 // ── Cambiar rol (solo admin) ─────────────────────────────────
 router.patch('/users/:id/role', authenticate, authorize('ADMIN'), ctrl.changeRole)
 

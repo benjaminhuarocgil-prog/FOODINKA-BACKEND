@@ -2,6 +2,14 @@ import * as authService from './auth.service.js'
 import { prisma } from '../../config/database.js'
 import { getIdentityClaims } from '../../config/auth0.js'
 import { AppError } from '../../shared/utils/appError.js'
+import { invalidateUserCache } from '../../middleware/auth.middleware.js'
+import { timingSafeEqual } from 'node:crypto'
+
+function secureTokenMatches(received, expected) {
+  const receivedBuffer = Buffer.from(received || '')
+  const expectedBuffer = Buffer.from(expected || '')
+  return receivedBuffer.length === expectedBuffer.length && timingSafeEqual(receivedBuffer, expectedBuffer)
+}
 
 // POST /api/v1/auth/sync
 export async function sync(req, res) {
@@ -50,7 +58,7 @@ export async function registerRestaurant(req, res) {
   const userId = req.user.id
   const {
     name, ruc, category, description,
-    address, addressReference, district, phone, latitude, longitude,
+    address, addressReference, district, phone, latitude, longitude, logoUrl,
   } = req.body
  
   // Validaciones
@@ -93,6 +101,7 @@ export async function registerRestaurant(req, res) {
       data: {
         ownerId: userId,
         name, ruc, category, description,
+        logoUrl: logoUrl || null,
         address, addressReference: addressReference || null, district, phone,
         latitude: lat, longitude: lng,
         status: 'PENDING_VERIFICATION',
@@ -112,4 +121,24 @@ export async function registerRestaurant(req, res) {
     message: 'Restaurante registrado. Pendiente de verificación por el administrador.',
     data: restaurant,
   })
+}
+
+// POST /api/v1/auth/register-admin
+// Solo se habilita mediante un enlace privado que incluye la clave configurada
+// exclusivamente en ADMIN_INVITE_TOKEN dentro de Render.
+export async function registerAdmin(req, res) {
+  const expectedToken = process.env.ADMIN_INVITE_TOKEN
+  const inviteToken = req.body?.inviteToken
+
+  if (!expectedToken) throw new AppError('El alta de administradores no está configurada', 503)
+  if (!secureTokenMatches(inviteToken, expectedToken)) throw new AppError('El enlace de administrador no es válido', 403)
+
+  const user = await prisma.user.update({
+    where: { id: req.user.id },
+    data: { role: 'ADMIN' },
+    select: { id: true, name: true, email: true, role: true },
+  })
+  invalidateUserCache(req.user.auth0Id)
+
+  res.json({ success: true, message: 'Administrador registrado correctamente', data: user })
 }
