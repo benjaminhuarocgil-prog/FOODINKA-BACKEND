@@ -133,6 +133,14 @@ export async function registerAdmin(req, res) {
   if (!expectedToken) throw new AppError('El alta de administradores no está configurada', 503)
   if (!secureTokenMatches(inviteToken, expectedToken)) throw new AppError('El enlace de administrador no es válido', 403)
 
+  const existingAdmin = await prisma.user.findFirst({
+    where: { role: 'ADMIN' },
+    select: { id: true },
+  })
+  if (existingAdmin && existingAdmin.id !== req.user.id) {
+    throw new AppError('Ya existe un administrador registrado en la plataforma', 409)
+  }
+
   const user = await prisma.user.update({
     where: { id: req.user.id },
     data: { role: 'ADMIN' },
