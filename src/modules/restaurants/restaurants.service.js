@@ -116,6 +116,104 @@ export async function getOne(id) {
   }
 }
 
+async function requireRestaurantAccess(restaurantId, userId, role) {
+  const restaurant = await prisma.restaurant.findUnique({
+    where: { id: restaurantId },
+    select: { id: true, ownerId: true },
+  })
+  if (!restaurant) throw new AppError('Restaurante no encontrado', 404)
+  if (restaurant.ownerId !== userId && role !== 'ADMIN') {
+    throw new AppError('No tienes permisos sobre este restaurante', 403)
+  }
+  return restaurant
+}
+
+// ── Clientes y consumo exclusivo del restaurante ──────────────
+export async function listCustomers(restaurantId, userId, role, { search = '', sort = 'highest' }) {
+  await requireRestaurantAccess(restaurantId, userId, role)
+
+  const orders = await prisma.order.findMany({
+    where: {
+      restaurantId,
+      status: { not: 'CANCELLED' },
+      ...(search.trim() && {
+        user: {
+          OR: [
+            { name: { contains: search.trim(), mode: 'insensitive' } },
+            { email: { contains: search.trim(), mode: 'insensitive' } },
+          ],
+        },
+      }),
+    },
+    select: {
+      total: true, type: true, createdAt: true,
+      user: { select: { id: true, name: true, email: true, avatarUrl: true } },
+    },
+  })
+
+  const clients = new Map()
+  for (const order of orders) {
+    const current = clients.get(order.user.id) || {
+      ...order.user, totalSpent: 0, totalOrders: 0,
+      deliveryOrders: 0, reservationOrders: 0, lastOrderAt: order.createdAt,
+    }
+    current.totalSpent += order.total
+    current.totalOrders += 1
+    if (order.type === 'DELIVERY') current.deliveryOrders += 1
+    else current.reservationOrders += 1
+    if (order.createdAt > current.lastOrderAt) current.lastOrderAt = order.createdAt
+    clients.set(order.user.id, current)
+  }
+
+  const data = [...clients.values()].map(client => ({
+    ...client,
+    totalSpent: Number(client.totalSpent.toFixed(2)),
+    averageTicket: Number((client.totalSpent / client.totalOrders).toFixed(2)),
+  }))
+  data.sort((a, b) => sort === 'lowest'
+    ? a.totalSpent - b.totalSpent
+    : sort === 'name'
+      ? a.name.localeCompare(b.name, 'es')
+      : b.totalSpent - a.totalSpent)
+
+  return { data, total: data.length }
+}
+
+export async function getCustomer(restaurantId, customerId, userId, role) {
+  await requireRestaurantAccess(restaurantId, userId, role)
+
+  const orders = await prisma.order.findMany({
+    where: { restaurantId, userId: customerId, status: { not: 'CANCELLED' } },
+    select: {
+      id: true, orderNumber: true, type: true, total: true, status: true, createdAt: true,
+      user: { select: { id: true, name: true, email: true, avatarUrl: true } },
+      items: { select: { quantity: true, product: { select: { name: true } } } },
+    },
+    orderBy: { createdAt: 'desc' },
+  })
+  if (!orders.length) throw new AppError('Cliente no encontrado en este restaurante', 404)
+
+  const stats = orders.reduce((result, order) => {
+    result.totalSpent += order.total
+    result.totalOrders += 1
+    if (order.type === 'DELIVERY') {
+      result.delivery.orders += 1
+      result.delivery.totalSpent += order.total
+    } else {
+      result.reservation.orders += 1
+      result.reservation.totalSpent += order.total
+    }
+    return result
+  }, { totalSpent: 0, totalOrders: 0, delivery: { orders: 0, totalSpent: 0 }, reservation: { orders: 0, totalSpent: 0 } })
+
+  stats.totalSpent = Number(stats.totalSpent.toFixed(2))
+  stats.averageTicket = Number((stats.totalSpent / stats.totalOrders).toFixed(2))
+  stats.delivery.totalSpent = Number(stats.delivery.totalSpent.toFixed(2))
+  stats.reservation.totalSpent = Number(stats.reservation.totalSpent.toFixed(2))
+
+  return { customer: orders[0].user, stats, orders }
+}
+
 // ── Crear restaurante ─────────────────────────────────────────
 export async function create(ownerId, body) {
   // Verificar que el dueño no tenga ya un restaurante

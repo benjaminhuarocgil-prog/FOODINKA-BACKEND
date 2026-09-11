@@ -12,6 +12,16 @@ export async function getOne(req, res) {
   res.json({ success: true, data })
 }
 
+export async function listCustomers(req, res) {
+  const result = await svc.listCustomers(req.params.id, req.user.id, req.user.role, req.query)
+  res.json({ success: true, ...result })
+}
+
+export async function getCustomer(req, res) {
+  const data = await svc.getCustomer(req.params.id, req.params.customerId, req.user.id, req.user.role)
+  res.json({ success: true, data })
+}
+
 // POST /api/v1/restaurants
 export async function create(req, res) {
   const {
