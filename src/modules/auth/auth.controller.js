@@ -3,13 +3,6 @@ import { prisma } from '../../config/database.js'
 import { getIdentityClaims } from '../../config/auth0.js'
 import { AppError } from '../../shared/utils/appError.js'
 import { invalidateUserCache } from '../../middleware/auth.middleware.js'
-import { timingSafeEqual } from 'node:crypto'
-
-function secureTokenMatches(received, expected) {
-  const receivedBuffer = Buffer.from(received || '')
-  const expectedBuffer = Buffer.from(expected || '')
-  return receivedBuffer.length === expectedBuffer.length && timingSafeEqual(receivedBuffer, expectedBuffer)
-}
 
 // POST /api/v1/auth/sync
 export async function sync(req, res) {
@@ -124,14 +117,13 @@ export async function registerRestaurant(req, res) {
 }
 
 // POST /api/v1/auth/register-admin
-// Solo se habilita mediante un enlace privado que incluye la clave configurada
-// exclusivamente en ADMIN_INVITE_TOKEN dentro de Render.
+// El único correo autorizado se configura en ADMIN_EMAIL dentro de Render.
 export async function registerAdmin(req, res) {
-  const expectedToken = process.env.ADMIN_INVITE_TOKEN
-  const inviteToken = req.body?.inviteToken
+  const adminEmail = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase()
+  const currentEmail = String(req.user.email || '').trim().toLowerCase()
 
-  if (!expectedToken) throw new AppError('El alta de administradores no está configurada', 503)
-  if (!secureTokenMatches(inviteToken, expectedToken)) throw new AppError('El enlace de administrador no es válido', 403)
+  if (!adminEmail) throw new AppError('El correo del administrador no está configurado', 503)
+  if (currentEmail !== adminEmail) throw new AppError('Esta cuenta no está autorizada para ser administradora', 403)
 
   const existingAdmin = await prisma.user.findFirst({
     where: { role: 'ADMIN' },
