@@ -201,7 +201,7 @@ model Order {
   driverAssignedAt  DateTime?
   pickedUpAt        DateTime?
   deliveredAt       DateTime?
-  deliveryCode      String?
+  deliveryCode      String?     @unique
   deliveryProofUrl  String?
   deliveryProofAt   DateTime?
 

@@ -192,14 +192,15 @@ export async function create(userId, body) {
     where: { userId }, select: { id: true },
   })
 
-  // Crear pedido en transacción
-  const order = await prisma.$transaction(async tx => {
+  // Crear pedido en transacción. La restricción @unique de deliveryCode es la
+  // garantía final; si el azar genera una colisión se intenta otro código.
+  const createOrder = deliveryCode => prisma.$transaction(async tx => {
     const newOrder = await tx.order.create({
       data: {
         type, status: 'PENDING', userId, restaurantId,
         subtotal, deliveryFee, total,
         notes: notes || null,
-        ...(type === 'DELIVERY' && { deliveryCode: generateDeliveryCode() }),
+        ...(type === 'DELIVERY' && { deliveryCode }),
         ...(consumerProfile && { consumerProfileId: consumerProfile.id }),
         ...addressData,
         ...(type === 'RESERVATION' && {
@@ -225,6 +226,16 @@ export async function create(userId, body) {
 
     return newOrder
   })
+
+  let order
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      order = await createOrder(type === 'DELIVERY' ? generateDeliveryCode() : undefined)
+      break
+    } catch (error) {
+      if (type !== 'DELIVERY' || error.code !== 'P2002' || attempt === 4) throw error
+    }
+  }
 
   return order
 }
