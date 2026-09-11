@@ -8,6 +8,7 @@ router.use(authenticate)
 // ── Consumidor ─────────────────────────────────────────────────
 router.post('/',          ctrl.create)        // crear pedido
 router.get('/my',         ctrl.myOrders)      // mis pedidos + historial
+router.get('/reverse-geocode', ctrl.reverseGeocode)
 router.get('/:id',        ctrl.getOne)        // detalle de un pedido
 router.patch('/:id/cancel', ctrl.cancel)      // cancelar pedido
 router.post('/:id/driver-rating', ctrl.rateDriver) // calificar repartidor

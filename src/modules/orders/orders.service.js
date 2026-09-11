@@ -1,6 +1,7 @@
 import { prisma } from '../../config/database.js'
 import { AppError } from '../../shared/utils/appError.js'
 import { randomInt } from 'node:crypto'
+import axios from 'axios'
 
 // ── Include reutilizable ──────────────────────────────────────
 const ORDER_INCLUDE = {
@@ -59,6 +60,33 @@ function hideDeliveryCode(order) {
   if (!order) return order
   const { deliveryCode: _deliveryCode, ...safeOrder } = order
   return safeOrder
+}
+
+// ── Convertir coordenadas en dirección de entrega ─────────────
+export async function reverseGeocode({ latitude, longitude }) {
+  const lat = Number(latitude)
+  const lng = Number(longitude)
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+    throw new AppError('Coordenadas inválidas', 400)
+  }
+
+  try {
+    const { data } = await axios.get('https://nominatim.openstreetmap.org/reverse', {
+      params: { format: 'jsonv2', lat, lon: lng, addressdetails: 1 },
+      timeout: 8000,
+      headers: { 'User-Agent': 'FoodinkaDelivery/1.0' },
+    })
+    const location = data?.address || {}
+    const address = [location.road, location.house_number].filter(Boolean).join(' ')
+      || String(data?.display_name || '').split(',').slice(0, 2).join(',').trim()
+    const district = location.city_district || location.suburb || location.neighbourhood || location.municipality || location.district || location.city || ''
+
+    if (!address) throw new Error('Sin dirección disponible')
+    return { address, district, rawAddress: data.display_name || '' }
+  } catch (error) {
+    if (error instanceof AppError) throw error
+    throw new AppError('No se pudo obtener la dirección del punto seleccionado. Intenta nuevamente.', 502)
+  }
 }
 
 // ── Crear pedido ──────────────────────────────────────────────

@@ -56,6 +56,12 @@ export async function assignDriver(req, res) {
   res.json({ success: true, message: 'Pedido tomado exitosamente', data })
 }
 
+// GET /api/v1/orders/reverse-geocode?latitude=&longitude=
+export async function reverseGeocode(req, res) {
+  const data = await svc.reverseGeocode(req.query)
+  res.json({ success: true, data })
+}
+
 // POST /api/v1/orders/:id/driver-rating
 export async function rateDriver(req, res) {
   const data = await svc.rateDriver(req.params.id, req.user.id, req.body)
